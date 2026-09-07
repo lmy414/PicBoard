@@ -33,7 +33,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; }
+html, body, #root { position: relative; width: 100%; height: 100%; min-height: 0; }
 body { margin: 0; min-width: 0; min-height: 0; overflow: hidden; background: transparent; font-size: 13px; line-height: 1.5; }
 button { border: 0; color: inherit; font: inherit; cursor: pointer; background: transparent; }
 button:disabled { cursor: default; opacity: .45; }
@@ -70,7 +70,7 @@ button:active:not(:disabled) { transform: scale(.96); }
 .intake-badge.error circle { fill: var(--canvas); }
 
 /* ---- expanded app shell -------------------------------------------------- */
-.app-shell { height: 100%; min-height: 0; border-radius: var(--radius-panel); overflow: hidden; position: relative; display: flex; flex-direction: column; background: var(--panel); animation: panel-in .22s cubic-bezier(.22, 1.2, .36, 1) both; }
+.app-shell { position: absolute; inset: 0; min-height: 0; height: auto; display: flex; flex-direction: column; border-radius: var(--radius-panel); overflow: hidden; background: var(--panel); animation: panel-in .22s cubic-bezier(.22, 1.2, .36, 1) both; }
 .app-shell.closing { animation: panel-out .14s ease both; }
 .topbar { display: flex; align-items: center; gap: var(--space-2); min-height: 56px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .window-drag-region { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; -webkit-app-region: drag; }
@@ -226,7 +226,8 @@ button:active:not(:disabled) { transform: scale(.96); }
 .dialog-actions .danger-button { background: var(--danger); color: var(--canvas); }
 
 /* ---- settings -------------------------------------------------------------------- */
-.settings-view { flex: 1; min-height: 0; overflow: auto; padding: 16px 16px 28px; background: var(--surface); }
+.settings-view { position: relative; flex: 1 1 0%; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 16px 40px; background: var(--surface); contain: layout paint; }
+.settings-section:last-child { margin-bottom: 0; }
 .settings-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 2px 2px 14px; border-bottom: 1px solid var(--border); }
 .settings-heading h1 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; }
 .settings-heading p { max-width: 420px; margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }

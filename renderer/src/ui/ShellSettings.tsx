@@ -147,18 +147,20 @@ export function ShellSettings() {
               key={option.value}
               type="button"
               role="radio"
+              className="qib-choice"
               aria-checked={settings.closeBehavior === option.value}
               disabled={busy}
-              title={option.hint}
+              title={`${option.label}：${option.hint}${settings.closeBehavior === option.value ? '（当前）' : ''}`}
               onClick={() => chooseCloseBehavior(option.value)}
             >
-              {option.label}
+              <span className="qib-choice-text">{option.label}</span>
+              {settings.closeBehavior === option.value && <span className="qib-choice-tick" aria-hidden="true" />}
               <small>{option.hint}</small>
             </button>
           ))}
         </div>
       </div>
-      <label className="qib-toggle-row">
+      <label className="qib-toggle-row" onMouseDown={(event) => { if (!settings.autoStartAvailable || busy) return; event.preventDefault(); }}>
         <input
           type="checkbox"
           checked={settings.autoStart}

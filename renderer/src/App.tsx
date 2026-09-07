@@ -362,6 +362,19 @@ function App() {
     setWorldOffset({ x: viewport.x, y: viewport.y });
   }, [state?.activeCanvasId]);
 
+  // Resize/zoom guard: WebView2 can momentarily hand the page a stale inner
+  // size when the host writes the Run key and the window regains focus; force
+  // one layout reflow pass after any inner-size change so the shell can never
+  // stay shifted with a white band at the bottom.
+  useEffect(() => {
+    const reflow = () => { requestAnimationFrame(() => requestAnimationFrame(() => { window.dispatchEvent(new Event('qib:reflow')); })); };
+    window.addEventListener('resize', reflow);
+    const observer = new ResizeObserver(reflow);
+    const root = document.getElementById('root');
+    if (root) observer.observe(root);
+    return () => { window.removeEventListener('resize', reflow); observer.disconnect(); };
+  }, []);
+
   // ---- clipboard paste (business semantics untouched) --------------------------
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {

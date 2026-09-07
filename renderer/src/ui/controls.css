@@ -457,47 +457,68 @@
 
 .qib-choice {
   box-sizing: border-box;
-  min-height: 32px;
-  padding: 6px 4px;
+  position: relative;
+  min-height: 36px;
+  padding: 7px 8px 6px;
   border: 1px solid var(--border, #e5e5e5);
   border-radius: 9px;
   background: var(--surface, #fafafa);
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--ink, #202421);
   font: inherit;
   font-size: 11px;
   line-height: 16px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: center;
   gap: 2px;
+  text-align: left;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .qib-choice small {
+  color: var(--muted, rgba(0, 0, 0, 0.58));
   font-size: 9px;
   line-height: 12px;
-  opacity: 0.8;
+}
+
+.qib-choice-text {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.qib-choice-tick {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #23856b);
+  color: var(--canvas, #ffffff);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.qib-choice-tick::before {
+  content: "✓";
 }
 
 .qib-choice:hover {
-  border-color: var(--accent, #10a37f);
-  color: var(--ink, #000000);
+  border-color: var(--accent, #23856b);
+  background: var(--surface, #ffffff);
 }
 
 .qib-choice[aria-checked="true"] {
-  border-color: var(--accent, #10a37f);
-  background: rgba(16, 163, 127, 0.09);
-  color: var(--ink, #000000);
+  border-color: var(--accent, #23856b);
+  background: rgba(35, 133, 107, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(35, 133, 107, 0.18);
+  color: var(--ink, #202421);
   font-weight: 500;
-}
-
-.qib-choice[aria-checked="true"]::after {
-  content: "✓";
-  display: block;
-  height: 12px;
-  font-size: 10px;
-  line-height: 12px;
-  color: var(--accent, #10a37f);
 }
 
 .qib-choice:disabled {
