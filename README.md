@@ -46,9 +46,9 @@ cargo build --manifest-path src-tauri/Cargo.toml
 
 ## Windows 便携包与桌面设置
 
-本轮预览包：`release/quick-image-board-windows-20260907-234407.zip`（约 1.71 MB）。
+第一阶段交付包：`release/quick-image-board-windows-20260908-000131.zip`（2,783,671 bytes，约 2.78 MB，含依赖声明）。
 解压后运行 `quick-image-board.exe`，需要系统已安装 Microsoft Edge WebView2 Evergreen Runtime。
-这是未签名预览包，不是安装器；最终体验验收边界见 `docs/PHASE-1-ACCEPTANCE.md`。
+这是未签名便携应用，不是安装器；独立运行与核心发布验收见 `docs/PHASE-1-RELEASE-GATE.md`，视觉打磨记录见 `docs/PHASE-1-ACCEPTANCE.md`。
 
 - 设置 → 窗口与启动：关闭行为可选“收起为悬浮球”（默认）、“隐藏到托盘”、“退出应用”。
 - 托盘菜单始终可打开画板、显示悬浮球或完全退出。

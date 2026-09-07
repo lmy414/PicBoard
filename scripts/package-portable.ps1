@@ -20,19 +20,25 @@ try {
     New-Item -ItemType Directory -Path $licenses -Force | Out-Null
     Copy-Item -LiteralPath 'renderer\src\third-party\bloub\LICENSE' -Destination (Join-Path $licenses 'bloub-LICENSE.txt')
     Copy-Item -LiteralPath 'renderer\src\third-party\bloub\NOTICE.md' -Destination (Join-Path $licenses 'bloub-NOTICE.md')
+    & node scripts/collect-licenses.mjs $licenses
+    if ($LASTEXITCODE -ne 0) { throw 'Third-party notice collection failed; no distributable archive created' }
     @'
-Quick Image Board / Windows portable preview
+Quick Image Board / Phase 1 Windows portable
 
 Extract this entire archive to a stable local directory and run quick-image-board.exe.
 Requires the Microsoft Edge WebView2 Evergreen Runtime installed on this computer.
-WebView2 and Windows system components are NOT bundled. This preview is unsigned.
+WebView2 and Windows system components are NOT bundled. This build is unsigned.
 Do not run Electron and this application against the same image library simultaneously.
 Keep this folder in a stable location before enabling startup at login in Settings.
 The startup option is off by default. Disable it before moving or deleting this folder.
 The tray menu provides a full Quit action independently of the configured window-close behavior.
 User image data is not bundled. Keep backups of existing libraries before using preview builds.
-This package is a local preview, not a signed installer or an automatic updater.
+This package is the Phase 1 portable application, not a signed installer or an automatic updater.
+Folder selection in Settings edits directory preferences only; it does not move the active library.
+Default library: %APPDATA%\quick-image-board\quick-image-board (outside this application folder).
 '@ | Set-Content -LiteralPath (Join-Path $stage 'READ-ME.txt') -Encoding UTF8
+    # Cargo crates may retain 1970 timestamps; ZIP only supports 1980 onward.
+    Get-ChildItem -LiteralPath $stage -Recurse -Force | Where-Object { $_.LastWriteTime.Year -lt 1980 -or $_.LastWriteTime.Year -gt 2107 } | ForEach-Object { $_.LastWriteTime = Get-Date }
     $zip = Join-Path $release "$name.zip"
     Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
     $bytes = (Get-Item -LiteralPath $zip).Length
