@@ -7,5 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      // Rust build output changes constantly under tauri dev; watching the
+      // dll/executables on Windows triggers EBUSY and kills Vite.
+      ignored: ["**/src-tauri/target/**", "**/dist-electron/**", "**/dist/**"],
+    },
   },
 });
