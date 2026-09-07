@@ -6,7 +6,7 @@
 //! `Uint8Array` arguments arrive as `Vec<u8>` thanks to Tauri's IPC serializer;
 //! `dataUrl` values never leave the snapshot (they are stripped before persist).
 
-use crate::dto::{AppState, CanvasViewport, CopyResult, ImportImagePayload, ImportViewport, PasteResult};
+use crate::dto::{AppState, CanvasViewport, CopyResult, DesktopSettingsDto, ImportImagePayload, ImportViewport, PasteResult};
 use crate::error::AppError;
 use crate::preferences::{PreferenceStore, BALL_SETTINGS_KEY, PATH_SETTINGS_KEY};
 use crate::storage::ImageBoardStorage;
@@ -176,6 +176,62 @@ pub fn set_expanded(
 #[tauri::command]
 pub fn close_window(window: State<'_, WindowController>) -> Result<(), AppError> {
     window.close()
+}
+
+/// Read current desktop settings (close behavior + real auto-start state).
+#[tauri::command]
+pub fn get_desktop_settings(
+    desktop: State<'_, crate::desktop::DesktopState>,
+) -> Result<DesktopSettingsDto, AppError> {
+    let prefs = desktop.current();
+    Ok(DesktopSettingsDto {
+        close_behavior: prefs.close_behavior,
+        auto_start: prefs.auto_start,
+        auto_start_available: desktop.auto_start.availability().available,
+    })
+}
+
+/// Update desktop settings. In debug builds auto-start writes are rejected
+/// before touching the registry; failures surface as errors.
+#[tauri::command]
+pub fn set_desktop_settings(
+    desktop: State<'_, crate::desktop::DesktopState>,
+    patch: Option<serde_json::Value>,
+) -> Result<DesktopSettingsDto, AppError> {
+    use crate::desktop::CloseBehavior;
+    let patch = patch.unwrap_or_else(|| json!({}));
+    let mut close_behavior: Option<CloseBehavior> = None;
+    let mut auto_start: Option<bool> = None;
+    if let Some(value) = patch.get("closeBehavior") {
+        let behavior = value.as_str().ok_or_else(|| AppError::message("closeBehavior 必须是字符串"))?;
+        close_behavior = Some(match behavior {
+            "float" => CloseBehavior::Float,
+            "tray" => CloseBehavior::Tray,
+            "quit" => CloseBehavior::Quit,
+            _ => return Err(AppError::message(format!("未知的 closeBehavior：{behavior}"))),
+        });
+    }
+    if let Some(value) = patch.get("autoStart") {
+        auto_start = Some(value.as_bool().ok_or_else(|| AppError::message("autoStart 必须是布尔值"))?);
+    }
+    if close_behavior.is_none() && auto_start.is_none() {
+        // No-op: still return the current state.
+    }
+    let prefs = crate::desktop::update_settings(&desktop, close_behavior, auto_start)?;
+    Ok(DesktopSettingsDto {
+        close_behavior: prefs.close_behavior,
+        auto_start: prefs.auto_start,
+        auto_start_available: desktop.auto_start.availability().available,
+    })
+}
+
+/// Narrow native directory picker (main window only). Cancel returns null.
+#[tauri::command]
+pub async fn pick_directory(
+    window: tauri::WebviewWindow,
+    initial_path: Option<String>,
+) -> Result<Option<String>, AppError> {
+    crate::desktop::pick_directory(&window, initial_path).await
 }
 
 #[tauri::command]

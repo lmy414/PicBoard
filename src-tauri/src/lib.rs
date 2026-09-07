@@ -15,6 +15,7 @@
 
 mod clipboard;
 mod commands;
+mod desktop;
 mod dto;
 mod error;
 mod paths;
@@ -85,6 +86,8 @@ fn install_preferences(app: &mut tauri::App) {
 
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     install_preferences(app);
+    // Desktop host: tray icon, close behavior, auto-start availability.
+    crate::desktop::setup_desktop(app)?;
     let data_root = resolve_data_root()?;
     eprintln!("[host] data root: {}", data_root.display());
 
@@ -140,6 +143,10 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Intercept close requests: float/tray prevent the close and run their
+    // own action; quit lets the window close naturally.
+    crate::desktop::install_close_behavior(&window)?;
+
     // Show the window once the renderer reports readiness and start cursor
     // tracking. A grace timer reveals it even if the page never reports.
     let show_window = window.clone();
@@ -164,6 +171,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap_preferences,
@@ -184,6 +192,9 @@ pub fn run() {
             commands::close_window,
             commands::start_window_drag,
             commands::end_window_drag,
+            commands::get_desktop_settings,
+            commands::set_desktop_settings,
+            commands::pick_directory,
         ]);
     let _ = builder.run(tauri::generate_context!());
 }

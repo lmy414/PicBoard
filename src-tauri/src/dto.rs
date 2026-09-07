@@ -92,3 +92,11 @@ pub struct PasteResult {
 pub struct CopyResult {
     pub copied: usize,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSettingsDto {
+    pub close_behavior: crate::desktop::CloseBehavior,
+    pub auto_start: bool,
+    pub auto_start_available: bool,
+}

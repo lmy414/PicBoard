@@ -3,10 +3,21 @@ import path from "node:path";
 import { createStorage } from "./storage";
 import { createWindowGeometryState, fitWindowToWorkArea, transitionWindowExpansion, type WindowGeometryState } from "./window-geometry";
 import { createWindowsFileClipboardWriter } from "./windows-clipboard";
-import type { ImportImagePayload, ImportViewport } from "../shared";
+import {
+  createDesktopHost,
+  createTray,
+  getDesktopSettings,
+  loadDesktopSettings,
+  pickDirectory,
+  sendExpanded,
+  setDesktopSettings,
+  type DesktopHost,
+} from "./desktop-settings";
+import type { CloseBehavior, ImportImagePayload, ImportViewport } from "../shared";
 
 let mainWindow: BrowserWindow | null = null;
 let storage: ReturnType<typeof createStorage> | null = null;
+let desktopHost: DesktopHost = createDesktopHost();
 let cursorTimer: ReturnType<typeof setInterval> | null = null;
 let windowDragTimer: ReturnType<typeof setInterval> | null = null;
 let windowDragStart: { cursorX: number; cursorY: number; windowX: number; windowY: number; width: number; height: number } | null = null;
@@ -101,6 +112,26 @@ function createWindow() {
     },
   });
 
+  // Window close honors the user's close behavior (float/tray/quit).
+  mainWindow.on("close", (event) => {
+    if (desktopHost.forceQuit || desktopHost.closeBehavior === "quit") {
+      return; // allow close
+    }
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) return;
+    event.preventDefault();
+    if (desktopHost.closeBehavior === "tray") {
+      win.hide();
+    } else {
+      // float: collapse to the floating 88x88 ball through the geometry-aware
+      // path so a later tray open can still restore the expanded bounds.
+      setWindowSize(false);
+    }
+    // Both cases hide the board; React must follow via the same host event
+    // used by the Rust host.
+    sendExpanded(win, false);
+  });
+
   const devUrl = process.env.NODE_ENV === "development" ? "http://127.0.0.1:5173" : null;
   const showWindow = () => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
@@ -157,17 +188,48 @@ function registerIpc() {
   ipcMain.handle("window:drag-start", () => startWindowDrag());
   ipcMain.handle("window:drag-end", () => stopWindowDrag());
   ipcMain.handle("window:close", () => mainWindow?.close());
+  ipcMain.handle("desktop:get-settings", () => getDesktopSettings(desktopHost));
+  ipcMain.handle("desktop:set-settings", (_event, patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }) =>
+    setDesktopSettings(desktopHost, patch),
+  );
+  ipcMain.handle("desktop:pick-directory", (_event, initialPath?: string) => pickDirectory(initialPath));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   storage = createStorage({ rootDir: path.join(app.getPath("userData"), "quick-image-board"), clipboard, fileClipboard: process.platform === "win32" ? createWindowsFileClipboardWriter() : undefined });
+  await loadDesktopSettings(desktopHost);
   registerIpc();
   createWindow();
+  createTray(desktopHost, {
+    open: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow();
+        return;
+      }
+      // Restore from tray/ball: expand + show + notify React.
+      setWindowSize(true);
+      mainWindow.show();
+      mainWindow.focus();
+      sendExpanded(mainWindow, true);
+    },
+    collapse: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        setWindowSize(false);
+        sendExpanded(mainWindow, false);
+      }
+    },
+    quit: () => {
+      desktopHost.forceQuit = true;
+      app.quit();
+    },
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on("window-all-closed", () => {
+  // float/tray intercept the close, so this only fires on a genuine quit
+  // (closeBehavior "quit" or the tray's forceQuit path).
   if (process.platform !== "darwin") app.quit();
 });

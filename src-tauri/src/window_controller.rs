@@ -170,33 +170,11 @@ impl WindowController {
         set_logical_bounds(&win, bounds)
     }
 
-    /// Expand or collapse the window.
+    /// Expand or collapse the window (renderer-initiated). The renderer has
+    /// already switched its own React state, so the host only resizes and does
+    /// not echo `window:expanded-changed` back (avoids event recursion).
     pub fn set_expanded(&self, expanded: bool) -> Result<(), AppError> {
-        eprintln!("[window] set_expanded({expanded}) called");
-        let win = main_window(&self.inner.handle)?;
-        let mut state = self
-            .inner
-            .geometry
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if state.expanded == expanded {
-            return Ok(());
-        }
-        let current = logical_rect(&win)?;
-        let scale = win.scale_factor()?;
-        let (anchor_x, anchor_y) = if !expanded && state.collapsed_bounds.is_some() {
-            let bounds = state.collapsed_bounds.unwrap_or(current);
-            ((bounds.x + bounds.width / 2) as f64 * scale, (bounds.y + bounds.height / 2) as f64 * scale)
-        } else {
-            ((current.x + current.width / 2) as f64 * scale, (current.y + current.height / 2) as f64 * scale)
-        };
-        let work_area = work_area_at(&win, anchor_x, anchor_y)?;
-        let (bounds, changed) =
-            window_geometry::transition_window_expansion(current, work_area, expanded, &mut state);
-        if changed {
-            set_logical_bounds(&win, bounds)?;
-        }
-        Ok(())
+        apply_expansion(&self.inner.handle, expanded, false)
     }
 
     pub fn is_expanded(&self) -> bool {
@@ -358,6 +336,57 @@ impl WindowController {
         win.close()?;
         Ok(())
     }
+}
+
+/// Shared expansion primitive used by renderer commands, tray actions and the
+/// float close path: resize the native window and optionally emit
+/// `window:expanded-changed` so React can follow. Host/tray/close paths emit
+/// the event; the renderer command does not (React already flipped its own
+/// state and would otherwise enter an event loop).
+pub fn set_window_expanded_state(app: &tauri::AppHandle, expanded: bool) -> Result<(), AppError> {
+    apply_expansion(app, expanded, true)
+}
+
+fn apply_expansion(
+    app: &tauri::AppHandle,
+    expanded: bool,
+    notify_renderer: bool,
+) -> Result<(), AppError> {
+    use tauri::Emitter;
+    let controller = app
+        .try_state::<WindowController>()
+        .ok_or_else(|| AppError::message("窗口控制器未初始化"))?;
+    eprintln!("[window] apply_expansion({expanded}, notify={notify_renderer})");
+    let win = main_window(app)?;
+    let mut state = controller
+        .inner
+        .geometry
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    // Resize only when the real geometry differs; the renderer notification is
+    // still sent below even when they already match (e.g. tray re-open after a
+    // hide left the geometry expanded but React was told collapsed).
+    if state.expanded != expanded {
+        let current = logical_rect(&win)?;
+        let scale = win.scale_factor()?;
+        let (anchor_x, anchor_y) = if !expanded && state.collapsed_bounds.is_some() {
+            let bounds = state.collapsed_bounds.unwrap_or(current);
+            ((bounds.x + bounds.width / 2) as f64 * scale, (bounds.y + bounds.height / 2) as f64 * scale)
+        } else {
+            ((current.x + current.width / 2) as f64 * scale, (current.y + current.height / 2) as f64 * scale)
+        };
+        let work_area = work_area_at(&win, anchor_x, anchor_y)?;
+        let (bounds, changed) =
+            window_geometry::transition_window_expansion(current, work_area, expanded, &mut state);
+        if changed {
+            set_logical_bounds(&win, bounds)?;
+        }
+    }
+    drop(state);
+    if notify_renderer {
+        app.emit("window:expanded-changed", expanded)?;
+    }
+    Ok(())
 }
 
 /// Start the 50ms cursor-position publisher thread if it is not already

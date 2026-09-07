@@ -14,7 +14,9 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppState,
   CanvasViewport,
+  CloseBehavior,
   CursorPosition,
+  DesktopSettings,
   ImageBoardApi,
   ImportImagePayload,
   ImportViewport,
@@ -46,6 +48,9 @@ function commandName(tsName: string): string {
     closeWindow: "close_window",
     startWindowDrag: "start_window_drag",
     endWindowDrag: "end_window_drag",
+    getDesktopSettings: "get_desktop_settings",
+    setDesktopSettings: "set_desktop_settings",
+    pickDirectory: "pick_directory",
   };
   return map[tsName] ?? tsName;
 }
@@ -85,6 +90,11 @@ export function createTauriAdapter(): ImageBoardApi {
     closeWindow: () => call<void>("closeWindow"),
     startWindowDrag: () => call<void>("startWindowDrag"),
     endWindowDrag: () => call<void>("endWindowDrag"),
+    getDesktopSettings: () => call<DesktopSettings>("getDesktopSettings"),
+    setDesktopSettings: (patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }) =>
+      call<DesktopSettings>("setDesktopSettings", { patch }),
+    pickDirectory: (initialPath?: string) =>
+      call<string | null>("pickDirectory", { initialPath }),
     onCursorPosition: (listener: (position: CursorPosition) => void) => {
       // Event plumbing is async; the unsubscribe is synchronous once ready.
       let unlisten: (() => void) | undefined;
@@ -107,6 +117,38 @@ export function createTauriAdapter(): ImageBoardApi {
           unlisten = undefined;
         } else {
           // Unsubscribed before the async listen resolved; drop it when ready.
+          void ready.then(() => {
+            if (unlisten) {
+              unlisten();
+              unlisten = undefined;
+            }
+          });
+        }
+      };
+    },
+    onExpandedChange: (listener: (expanded: boolean) => void) => {
+      // Host/tray/close actions emit `window:expanded-changed`; React listens
+      // and never re-invokes, so no recursion. Same async-bridge pattern as
+      // the cursor subscription above.
+      let unlisten: (() => void) | undefined;
+      let disposed = false;
+      const ready = listen<boolean>("window:expanded-changed", (event) => {
+        listener(event.payload);
+      }).then((fn) => {
+        if (disposed) {
+          void fn();
+        } else {
+          unlisten = fn;
+        }
+      }).catch((caught) => {
+        console.error("expanded event subscription failed", caught);
+      });
+      return () => {
+        disposed = true;
+        if (unlisten) {
+          unlisten();
+          unlisten = undefined;
+        } else {
           void ready.then(() => {
             if (unlisten) {
               unlisten();

@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CursorPosition, ImageBoardApi, ImportImagePayload, ImportViewport } from "../shared";
+import type {
+  CloseBehavior,
+  CursorPosition,
+  ImageBoardApi,
+  ImportImagePayload,
+  ImportViewport,
+} from "../shared";
 
 const api: ImageBoardApi = {
   loadState: () => ipcRenderer.invoke("store:load"),
@@ -26,10 +32,19 @@ const api: ImageBoardApi = {
   closeWindow: () => ipcRenderer.invoke("window:close"),
   startWindowDrag: () => ipcRenderer.invoke("window:drag-start"),
   endWindowDrag: () => ipcRenderer.invoke("window:drag-end"),
+  getDesktopSettings: () => ipcRenderer.invoke("desktop:get-settings"),
+  setDesktopSettings: (patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }) =>
+    ipcRenderer.invoke("desktop:set-settings", patch),
+  pickDirectory: (initialPath?: string) => ipcRenderer.invoke("desktop:pick-directory", initialPath),
   onCursorPosition: (listener: (position: CursorPosition) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, position: CursorPosition) => listener(position);
     ipcRenderer.on("window:cursor-position", handler);
     return () => ipcRenderer.removeListener("window:cursor-position", handler);
+  },
+  onExpandedChange: (listener: (expanded: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, expanded: boolean) => listener(expanded);
+    ipcRenderer.on("window:expanded-changed", handler);
+    return () => ipcRenderer.removeListener("window:expanded-changed", handler);
   },
 };
 

@@ -63,6 +63,15 @@ export interface CursorPosition {
   windowY: number;
 }
 
+/** Window close behavior: collapse to floating ball, hide to tray, or quit. */
+export type CloseBehavior = "float" | "tray" | "quit";
+
+export interface DesktopSettings {
+  closeBehavior: CloseBehavior;
+  autoStart: boolean;
+  autoStartAvailable: boolean;
+}
+
 export interface ImageBoardApi {
   loadState(): Promise<AppState>;
   importImages(canvasId: string, images: ImportImagePayload[], viewport?: ImportViewport): Promise<AppState>;
@@ -81,7 +90,11 @@ export interface ImageBoardApi {
   closeWindow(): Promise<void>;
   startWindowDrag(): Promise<void>;
   endWindowDrag(): Promise<void>;
+  getDesktopSettings(): Promise<DesktopSettings>;
+  setDesktopSettings(patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }): Promise<DesktopSettings>;
+  pickDirectory(initialPath?: string): Promise<string | null>;
   onCursorPosition(listener: (position: CursorPosition) => void): () => void;
+  onExpandedChange(listener: (expanded: boolean) => void): () => void;
 }
 
 declare global {
