@@ -1,0 +1,50 @@
+/*
+ * Ball-only CSS layer, imported by BloubBall.tsx (never edits global
+ * styles.css). Goals:
+ *
+ * 1. Neutralise the legacy continuous animations/glows that global styles.css
+ *    applies to .bloub-svg / .bloub-core (ball-morph, hover ring/squish,
+ *    drag-open core transform, drop glow) so that ONE controller — the intake
+ *    frame clock in BloubBall — owns body motion during an intake. Idle
+ *    breathing continues through the engine's own time-pure sample.
+ * 2. Carry the intake state classes with selectors more specific than the
+ *    legacy ones, without adding !important.
+ *
+ * Note: we only disable *animations* here, never a CSS `transform` value:
+ * per SVG2 the CSS transform property would override the inline attribute
+ * transform BloubBall sets on .bloub-core during the swallow pulse.
+ */
+.qib-bloub.bloub-svg {
+  /* Idle morph (ball-morph in styles.css) is replaced by the engine clock. */
+  animation: none;
+}
+
+/* Hover keeps a quiet contact shadow; the legacy green ring glow is dropped. */
+.qib-bloub.bloub-svg.bloub-hovered {
+  filter: drop-shadow(0 8px 6px rgba(20, 28, 22, 0.18));
+}
+
+/* Legacy per-state CSS animations on .bloub-core would fight the intake
+ * timeline; stop them while an intake state is active. */
+.qib-bloub.bloub-hovered .bloub-core,
+.qib-bloub.bloub-drag-open .bloub-core,
+.qib-bloub.qib-intake-open .bloub-core,
+.qib-bloub.qib-intake-receiving .bloub-core,
+.qib-bloub.qib-intake-swallow .bloub-core,
+.qib-bloub.qib-intake-reject .bloub-core {
+  animation: none;
+}
+
+/* Legacy success/error glows are replaced by the mouth/badge feedback. */
+.qib-bloub.bloub-drop-success,
+.qib-bloub.bloub-drop-error {
+  filter: none;
+}
+
+/* The mouth/chip/badge layers never intercept pointer input. */
+.qib-bloub .qib-intake-layer,
+.qib-bloub .qib-intake-chip,
+.qib-bloub .qib-mouth,
+.qib-bloub .qib-intake-badge {
+  pointer-events: none;
+}

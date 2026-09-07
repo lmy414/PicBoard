@@ -7,7 +7,9 @@ export interface BallSettings {
   eyeColor: string;
   shapeId: string;
   animation: BallAnimationMode;
+  /** 0.5x..2x: time scaling of the animation clock (fast = lively, 1 = real-time). */
   speed: number;
+  /** 0..1: amplitude scaling. 0 = no idle morph / no swallow bounce (plan 5.2). */
   motion: number;
   followGaze: boolean;
 }
@@ -19,13 +21,20 @@ export interface StorageLike {
 
 export const BALL_SETTINGS_KEY = "quick-image-board.ball-settings";
 
+/**
+ * Speed/motion semantics (plan 5.2): motion controls amplitude, speed controls
+ * time. motion=0 removes the idle morph, hover sparkles and swallow bounce
+ * while leaving functional state feedback visible (static mouth/chip/badge).
+ * Old stored settings keep their schema and ranges; only the absence of any
+ * stored value yields the calmer default below (plan 4.3 "quiet idle").
+ */
 export const DEFAULT_BALL_SETTINGS: BallSettings = {
   colorId: DEFAULT_COLOR,
   eyeColor: "#ffffff",
   shapeId: DEFAULT_SHAPE,
-  animation: "random",
+  animation: "rest",
   speed: 1,
-  motion: 1,
+  motion: 0.4,
   followGaze: true,
 };
 
