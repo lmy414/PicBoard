@@ -127,6 +127,7 @@ export function staticTargetFor(phase: IntakePhase, chipHeld: boolean): IntakeTa
   } else if (phase === "swallow") {
     // Success is conveyed by the fixed badge (done), not by a mouth replay.
     out.done = 1;
+    out.eat = 1;
   }
   return out;
 }

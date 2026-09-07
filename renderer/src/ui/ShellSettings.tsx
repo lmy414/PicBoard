@@ -76,7 +76,7 @@ export function ShellSettings() {
 
   const reload = async () => {
     const api = host();
-    if (typeof api?.getDesktopSettings !== "function") return;
+    if (typeof api?.getDesktopSettings !== "function") throw new Error("当前宿主未提供桌面设置接口");
     setSettings(await api.getDesktopSettings());
   };
 

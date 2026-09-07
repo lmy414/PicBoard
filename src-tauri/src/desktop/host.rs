@@ -116,14 +116,19 @@ pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<()
         }
         CloseBehavior::Float => {
             crate::window_controller::set_window_expanded_state(app, false)?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.show()?;
+            }
             Ok(())
         }
         CloseBehavior::Tray => {
             let window = app
                 .get_webview_window("main")
                 .ok_or_else(|| AppError::message("主窗口不存在"))?;
+            app.state::<crate::window_controller::WindowController>().cancel_drag();
+            app.state::<crate::window_controller::WindowController>().stop_cursor_tracking();
+            crate::window_controller::set_window_expanded_state(app, false)?;
             window.hide()?;
-            crate::desktop::tray::emit_expanded(app, false)?;
             Ok(())
         }
     }

@@ -398,7 +398,7 @@ export function ColorPicker({ value, onChange, label, disabled }: ColorPickerPro
                 min={0}
                 max={359}
                 step={1}
-                value={Math.round(hsv.h)}
+                value={Math.round(hsv.h) % 360}
                 aria-label="色相"
                 onChange={(event) => hueFromValue(Number(event.target.value))}
                 onKeyDown={hueKeyDown}

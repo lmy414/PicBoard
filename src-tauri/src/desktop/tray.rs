@@ -22,7 +22,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
         .ok_or_else(|| AppError::message("缺少托盘图标"))?;
 
     let open = MenuItem::with_id(app, MENU_OPEN, "打开画板", true, None::<&str>)?;
-    let collapse = MenuItem::with_id(app, MENU_COLLAPSE, "收起", true, None::<&str>)?;
+    let collapse = MenuItem::with_id(app, MENU_COLLAPSE, "显示悬浮球", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "完全退出", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -44,8 +44,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
                 let window = handle
                     .get_webview_window("main")
                     .ok_or_else(|| AppError::message("主窗口不存在"))?;
+                window.show()?;
                 if expanded {
-                    window.show()?;
                     window.set_focus()?;
                 }
                 // Resize the native window first, then tell the renderer. React

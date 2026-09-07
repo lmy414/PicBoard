@@ -27,7 +27,7 @@ mod sys {
 
     pub fn read_command() -> Result<Option<PathBuf>, AppError> {
         let mut hkey: HKEY = std::ptr::null_mut();
-        let key = RUN_KEY.encode_utf16().collect::<Vec<u16>>();
+        let key = RUN_KEY.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
         let status: WIN32_ERROR =
             unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_READ, &mut hkey) };
         if status == ERROR_FILE_NOT_FOUND {
@@ -67,13 +67,13 @@ mod sys {
         if value.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(PathBuf::from(value)))
+            Ok(Some(PathBuf::from(value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(&value))))
         }
     }
 
     pub fn set_command(command: &str) -> Result<(), AppError> {
         let mut hkey: HKEY = std::ptr::null_mut();
-        let key = RUN_KEY.encode_utf16().collect::<Vec<u16>>();
+        let key = RUN_KEY.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
         let status: WIN32_ERROR =
             unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_SET_VALUE, &mut hkey) };
         if status != ERROR_SUCCESS {
@@ -83,7 +83,7 @@ mod sys {
         }
         let mut value_name = VALUE_NAME.encode_utf16().collect::<Vec<u16>>();
         value_name.push(0);
-        let data: Vec<u16> = command.encode_utf16().collect();
+        let data: Vec<u16> = command.encode_utf16().chain(std::iter::once(0)).collect();
         let result = unsafe {
             RegSetValueExW(
                 hkey,
@@ -107,7 +107,7 @@ mod sys {
 
     pub fn remove_command() -> Result<(), AppError> {
         let mut hkey: HKEY = std::ptr::null_mut();
-        let key = RUN_KEY.encode_utf16().collect::<Vec<u16>>();
+        let key = RUN_KEY.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
         let status: WIN32_ERROR =
             unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_SET_VALUE, &mut hkey) };
         if status == ERROR_FILE_NOT_FOUND {

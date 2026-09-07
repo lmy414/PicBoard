@@ -109,7 +109,10 @@ export function Popover({
     const roomBelow = vh - EDGE - rect.bottom - GAP;
     const roomAbove = rect.top - EDGE - GAP;
     const flipAbove = height > roomBelow && height <= roomAbove;
-    const top = flipAbove ? rect.top - GAP - height : rect.bottom + GAP;
+    node.style.maxHeight = `${Math.max(0, vh - EDGE * 2)}px`;
+    node.style.overflowY = "auto";
+    const proposedTop = flipAbove ? rect.top - GAP - height : rect.bottom + GAP;
+    const top = Math.max(EDGE, Math.min(proposedTop, vh - EDGE - node.offsetHeight));
     setPlace({ left: Math.round(left), top: Math.round(top) });
   }, [align, width]);
 

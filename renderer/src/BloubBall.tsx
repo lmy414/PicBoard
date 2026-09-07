@@ -157,8 +157,8 @@ export function BloubBall({
       const realDt = Math.min(0.1, (now - last) / 1000);
       last = now;
       liveClockRef.current += realDt;
-      const clock = liveClockRef.current * settings.speed;
-      clockRef.current = clock;
+      clockRef.current += realDt * settings.speed;
+      const clock = clockRef.current;
 
       const inPhase = phaseRef.current;
       // prefers-reduced-motion / motion=0 switch the JS engine to static
@@ -231,7 +231,7 @@ export function BloubBall({
   };
 
   useEffect(() => {
-    if (!settings.followGaze) return;
+    if (!settings.followGaze || !active) return;
     const handlePointerMove = (event: PointerEvent) => updateLookAt(event.clientX, event.clientY);
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
     const unsubscribe = window.imageBoard.onCursorPosition((position) => updateLookAt(position.x - position.windowX, position.y - position.windowY));
@@ -240,7 +240,7 @@ export function BloubBall({
       unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.followGaze]);
+  }, [settings.followGaze, active]);
 
   const target = targetRef.current;
   const reducedMotion = reducedMotionRef.current || settings.motion <= 0.001;
@@ -263,11 +263,11 @@ export function BloubBall({
   // As the mouth closes the chip is clipped and scales down into the hole.
   const chipScale = chipShown ? Math.max(0.001, target.chip * (1 - target.eat * 0.9)) : 0.001;
   const chipVisible = chipShown && mouthOpen && chipScale > 0.02;
-  const swallowT = target.pulse;
+  const swallowT = target.pulse * Math.max(0, Math.min(1, settings.motion));
   // Badge appears just after the swallow pulse and holds while the caller
   // keeps success active (typically until App resets to idle). Drawn in the
   // fixed layout layer at a scale matched to the 68px ball (r15 => ~6.5px).
-  const badgeShow = state === "success" && phase === "swallow" && target.done >= 0.45 && target.eat >= 0.92;
+  const badgeShow = false; // The stable outer CollapsedBall layer owns the sole result badge.
 
   const chipOpacity = swallowT > 0 ? 1 - swallowT * 0.6 : target.chip < 1 ? target.chip : 1;
 

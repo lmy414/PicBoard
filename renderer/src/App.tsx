@@ -120,6 +120,7 @@ function App() {
   const [worldOffset, setWorldOffset] = useState({ x: DEFAULT_VIEWPORT.x, y: DEFAULT_VIEWPORT.y });
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [intake, setIntake] = useState<{ state: IntakeState; key: number }>({ state: "idle", key: 0 });
+  const [intakeCount, setIntakeCount] = useState(0);
   const intakeKeyRef = useRef(0);
   const intakeTimerRef = useRef<number | null>(null);
   const intakeStateRef = useRef<IntakeState>("idle");
@@ -505,6 +506,7 @@ function App() {
     const element = viewportRef.current;
     const viewport: ImportViewport = { x: worldOffset.x, y: worldOffset.y, zoom, width: element?.clientWidth ?? 640, height: element?.clientHeight ?? 480 };
     const seq = importSeqRef.current += 1;
+    setIntakeCount(accepted.length);
     pushIntake("receiving");
     markBusy();
     try {
@@ -512,7 +514,7 @@ function App() {
       const next = await window.imageBoard.importImages(state.activeCanvasId, payload, viewport);
       if (seq !== importSeqRef.current) return true;
       applyState(next);
-      pushIntake("success", 900);
+      pushIntake("success", Math.max(1000, 700 / ballSettings.speed + 500));
       showNotice(`已导入 ${accepted.length} 张图片`);
       return true;
     } catch (caught) {
@@ -636,11 +638,11 @@ function App() {
   if (!state) return <div className="loading-card">{loadError ? <><strong>本地图片画布打开失败</strong><span>{loadError}</span><div className="loading-actions"><button className="primary-button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>重试</button><button onClick={() => void window.imageBoard.closeWindow()}>退出</button></div></> : "正在打开本地图片画布…"}</div>;
 
   if (phase === "collapsed" || phase === "opening") {
-    return <CollapsedBall settings={ballSettings} count={canvasImages.length} intakeState={intake.state} intakeKey={intake.key} intakeCount={canvasImages.length} dropActive={dropActive} failureLabel={failureLabel} onOpen={() => requestExpand(true)} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} />;
+    return <CollapsedBall settings={ballSettings} count={canvasImages.length} intakeState={intake.state} intakeKey={intake.key} intakeCount={intakeCount} dropActive={dropActive} failureLabel={failureLabel} onOpen={() => requestExpand(true)} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} />;
   }
 
   return <main ref={appShellRef} className={`app-shell ${phase === "closing" ? "closing" : ""} ${dropActive ? "drop-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-    <header className="topbar"><div className="window-drag-region"><div className="brand-mark"><IntakeBall settings={ballSettings} variant="brand" /></div><div className="brand-copy"><strong>快捷图片画布</strong><span>{viewMode === "settings" ? "外观、路径与窗口行为" : "本地临时整理区"}</span></div></div><div className="topbar-actions"><button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button><button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button><button className={`icon-button no-drag settings-button ${viewMode === "settings" ? "active" : ""}`} aria-label="打开设置" title="打开设置" onClick={() => switchView("settings")}><IconGear size={15} /></button>{viewMode === "canvas" && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}<button className="icon-button no-drag" aria-label="收起画板" title="收起画板" onClick={() => requestExpand(false)}><IconMinus size={15} /></button><button className="icon-button no-drag close-window" aria-label="退出" title="退出" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button></div>{busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}</header>
+    <header className="topbar"><div className="window-drag-region"><div className="brand-mark"><IntakeBall settings={ballSettings} variant="brand" /></div><div className="brand-copy"><strong>快捷图片画布</strong><span>{viewMode === "settings" ? "外观、路径与窗口行为" : "本地临时整理区"}</span></div></div><div className="topbar-actions"><button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button><button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button><button className={`icon-button no-drag settings-button ${viewMode === "settings" ? "active" : ""}`} aria-label="打开设置" title="打开设置" onClick={() => switchView("settings")}><IconGear size={15} /></button>{viewMode === "canvas" && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}<button className="icon-button no-drag" aria-label="收起画板" title="收起画板" onClick={() => requestExpand(false)}><IconMinus size={15} /></button><button className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button></div>{busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}</header>
     {viewMode === "canvas" ? <>
       {showControls && <div className="canvas-controls"><div className="canvas-tabs">{state.canvases.map((canvas) => <button key={canvas.id} className={canvas.id === state.activeCanvasId ? "canvas-tab active" : "canvas-tab"} onClick={() => void changeCanvas(canvas.id)}>{canvas.name}<small>{canvas.imageIds.length}</small></button>)}<button className="add-canvas" onClick={() => { clearInteraction(); void update(() => window.imageBoard.createCanvas()); }}>＋ 新画布</button></div><div className="canvas-toolbar"><span className="toolbar-label">{activeCanvas?.name ?? "当前画布"}</span><span className="toolbar-hint">拖入图片 · 拖动定位 · 双击预览 · Shift 多选</span><div className="zoom-controls"><button title="缩小" aria-label="缩小" onClick={() => zoomBy(-0.1)}>−</button><span>{Math.round(zoom * 100)}%</span><button title="放大" aria-label="放大" onClick={() => zoomBy(0.1)}>＋</button><button className="locate-button" title="Ctrl+双击空白处定位全部" onClick={locateAll}>定位全部</button></div></div></div>}
       <div ref={viewportRef} className={`canvas-viewport ${dropActive ? "drop-active" : ""}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} onLostPointerCapture={stopPan}><div className="canvas-world" style={{ transform: `translate(${worldOffset.x}px, ${worldOffset.y}px) scale(${zoom})` }}>{canvasImages.map((image) => <CanvasImage key={image.id} image={image} zoom={zoom} selected={selectedIds.includes(image.id)} onSelect={selectImage} onPreview={openPreview} onHover={setHoveredId} onMove={(id, x, y) => void update(() => window.imageBoard.moveImage(id, x, y))} />)}</div>{canvasImages.length === 0 && <div className="empty-canvas"><div className="empty-icon">↘</div><strong>把图片拖到悬浮窗</strong><span>或点击后使用 Ctrl+V 粘贴到当前画布</span></div>}{canvasImages.length > 0 && <MiniMap images={canvasImages} viewportRef={viewportRef} worldOffset={worldOffset} zoom={zoom} onPreview={previewViewport} onCommit={commitViewport} />}</div>

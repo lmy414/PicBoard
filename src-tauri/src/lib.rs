@@ -159,11 +159,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    let fallback = window.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(4000));
-        let _ = fallback.show();
-    });
+    // Readiness owns initial visibility. An unconditional delayed show would
+    // undo a deliberate tray-hide performed during the first seconds.
+
 
     Ok(())
 }
@@ -196,5 +194,5 @@ pub fn run() {
             commands::set_desktop_settings,
             commands::pick_directory,
         ]);
-    let _ = builder.run(tauri::generate_context!());
+    builder.run(tauri::generate_context!()).expect("failed to run quick-image-board");
 }
