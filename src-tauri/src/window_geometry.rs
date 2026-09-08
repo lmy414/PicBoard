@@ -104,7 +104,8 @@ pub fn transition_window_expansion(
     state: &mut WindowGeometryState,
 ) -> (Rect, bool) {
     if state.expanded == expanded {
-        return (current, false);
+        let bounds = fit_window_to_work_area(current, work_area, expanded);
+        return (bounds, !same_bounds(current, bounds));
     }
     if expanded {
         let bounds = fit_window_to_work_area(current, work_area, true);
@@ -122,6 +123,38 @@ pub fn transition_window_expansion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_expansion_repairs_collapsed_actual_bounds_after_reload() {
+        let work = Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1040,
+        };
+        let mut state = WindowGeometryState {
+            expanded: true,
+            collapsed_bounds: Some(Rect {
+                x: 1600,
+                y: 20,
+                width: 88,
+                height: 88,
+            }),
+            collapsed_work_area: Some(work),
+        };
+        let current = Rect {
+            x: 1600,
+            y: 20,
+            width: 88,
+            height: 88,
+        };
+
+        let (bounds, changed) = transition_window_expansion(current, work, true, &mut state);
+
+        assert!(changed);
+        assert_eq!((bounds.width, bounds.height), (660, 760));
+        assert!(state.expanded);
+    }
 
     #[test]
     fn tiny_work_area_never_panics_or_places_window_outside_origin() {

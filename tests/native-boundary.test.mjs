@@ -77,3 +77,27 @@ test("drag end is idempotent and cannot revive cursor tracking after cancellatio
   assert.match(end, /return;/);
   assertOrdered(end, ["drag_active.swap(false", "thread.join()", "if !was_active", "self.start_cursor_tracking()"]);
 });
+
+test("renderer hydrates native expansion state before the first frame after reload", async () => {
+  const contract = await source("shared/image-board.ts");
+  assert.match(contract, /getExpanded\(\): Promise<boolean>/);
+
+  const adapter = await source("renderer/src/platform/tauri-adapter.ts");
+  assert.match(adapter, /getExpanded: \(\) => call<boolean>\("getExpanded"\)/);
+
+  const commands = await source("src-tauri/src/commands.rs");
+  assert.match(commands, /pub fn get_expanded[\s\S]*window\.is_expanded\(\)/);
+
+  const main = await source("renderer/src/main.tsx");
+  const start = branchBetween(main, "async function start()", "\nvoid start();");
+  const hydration = branchBetween(start, "const initialExpanded", "requestAnimationFrame(");
+  assert.ok(start.indexOf("bootstrapImageBoard()") < start.indexOf("const initialExpanded"));
+  assertOrdered(hydration, [".getExpanded()", ".setExpanded(initialExpanded)", "root.render("]);
+  assert.match(hydration, /<App initialExpanded=\{initialExpanded\}/);
+
+  const app = await source("renderer/src/App.tsx");
+  assert.match(app, /function App\(\{ initialExpanded \}: \{ initialExpanded: boolean \}\)/);
+  assert.match(app, /useState<PanelPhase>\(initialExpanded \? "expanded" : "collapsed"\)/);
+  assert.match(app, /useRef<PanelPhase>\(initialExpanded \? "expanded" : "collapsed"\)/);
+  assert.match(app, /useRef\(initialExpanded\)/);
+});

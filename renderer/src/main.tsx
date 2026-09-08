@@ -27,9 +27,11 @@ async function start() {
     return;
   }
 
+  const initialExpanded = await window.imageBoard.getExpanded();
+  await window.imageBoard.setExpanded(initialExpanded);
   root.render(
     <React.StrictMode>
-      <App />
+      <App initialExpanded={initialExpanded} />
     </React.StrictMode>,
   );
   // Report readiness after React committed its first frame so the host can

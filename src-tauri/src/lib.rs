@@ -227,6 +227,7 @@ pub fn run() {
             commands::remove_image_from_canvas,
             commands::move_image,
             commands::copy_image_files,
+            commands::get_expanded,
             commands::set_expanded,
             commands::close_window,
             commands::start_window_drag,

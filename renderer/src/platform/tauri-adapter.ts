@@ -44,6 +44,7 @@ function commandName(tsName: string): string {
     removeImageFromCanvas: "remove_image_from_canvas",
     moveImage: "move_image",
     copyImageFiles: "copy_image_files",
+    getExpanded: "get_expanded",
     setExpanded: "set_expanded",
     closeWindow: "close_window",
     startWindowDrag: "start_window_drag",
@@ -86,6 +87,7 @@ export function createTauriAdapter(): ImageBoardApi {
       call<AppState>("moveImage", { imageId, x, y }),
     copyImageFiles: (imageIds: string[]) =>
       call<{ copied: number }>("copyImageFiles", { imageIds }),
+    getExpanded: () => call<boolean>("getExpanded"),
     setExpanded: (expanded: boolean) => call<void>("setExpanded", { expanded }),
     closeWindow: () => call<void>("closeWindow"),
     startWindowDrag: () => call<void>("startWindowDrag"),

@@ -166,6 +166,11 @@ pub fn bootstrap_preferences(store: State<'_, PreferenceStore>) -> Result<Value,
 }
 
 #[tauri::command]
+pub fn get_expanded(window: State<'_, WindowController>) -> bool {
+    window.is_expanded()
+}
+
+#[tauri::command]
 pub fn set_expanded(
     window: State<'_, WindowController>,
     expanded: bool,

@@ -90,13 +90,13 @@ function hostApi(): ImageBoardApi & HostExtensions {
   return window.imageBoard as ImageBoardApi & HostExtensions;
 }
 
-function App() {
+function App({ initialExpanded }: { initialExpanded: boolean }) {
   const [state, setState] = useState<AppState | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const [phase, setPhaseState] = useState<PanelPhase>("collapsed");
-  const phaseRef = useRef<PanelPhase>("collapsed");
-  const desiredRef = useRef(false);
+  const [phase, setPhaseState] = useState<PanelPhase>(initialExpanded ? "expanded" : "collapsed");
+  const phaseRef = useRef<PanelPhase>(initialExpanded ? "expanded" : "collapsed");
+  const desiredRef = useRef(initialExpanded);
   const hostFlightRef = useRef<{ seq: number; target: boolean } | null>(null);
   const hostSeqRef = useRef(0);
   const exitTimerRef = useRef<number | null>(null);
