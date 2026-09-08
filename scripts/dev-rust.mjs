@@ -7,18 +7,14 @@
 //
 // Usage:
 //   npm run dev:rust                     isolated dev run (Vite + Rust host)
-//   npm run dev:rust -- --preferences-export <file>
-//                                        also seed the two renderer preference keys
-//                                        from an `npm run export:prefs` output file
 //   npm run dev:rust -- --data-root <dir>
 //                                        reuse an EXISTING data root instead of a
 //                                        fresh temp dir (caller is responsible for
-//                                        isolation; never points at the real
-//                                        Electron user data by default)
+//                                        isolation)
 //
 // Default isolation: a fresh temporary directory holds ONLY this run's business
 // data and log output, and `--data-root <dir>` is always passed explicitly so
-// the app can never read/write the real Electron user-data directory. The
+// the app cannot accidentally use a developer's normal data directory. The
 // temporary directory is printed on start and intentionally NOT deleted
 // automatically; the developer may inspect it and clean it up.
 
@@ -43,6 +39,9 @@ for (let i = 2; i < process.argv.length; i += 1) {
     i += 1;
   } else if (arg.startsWith("--data-root=")) {
     explicitDataRoot = arg.slice("--data-root=".length);
+  } else if (arg === "--preferences-export" || arg.startsWith("--preferences-export=")) {
+    console.error("[dev:rust] --preferences-export 已移除；当前偏好仅由 Rust/Tauri 当前配置管理");
+    process.exit(1);
   } else {
     forwarded.push(arg);
   }

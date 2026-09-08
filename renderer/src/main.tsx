@@ -9,8 +9,8 @@ if (!rootElement) throw new Error("找不到应用挂载节点");
 const root = ReactDOM.createRoot(rootElement);
 
 async function start() {
-  // Install `window.imageBoard` (Tauri adapter or keep Electron preload object)
-  // before React mounts; without it App's initial loadState would fail.
+  // Install the Tauri adapter before React mounts; without it App's initial
+  // loadState would fail.
   try {
     await bootstrapImageBoard();
   } catch (caught) {

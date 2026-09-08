@@ -25,7 +25,12 @@ impl Rect {
         if x1 <= x0 || y1 <= y0 {
             None
         } else {
-            Some(Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
+            Some(Rect {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            })
         }
     }
 }
@@ -38,7 +43,11 @@ pub struct WindowGeometryState {
 }
 
 pub fn create_window_geometry_state() -> WindowGeometryState {
-    WindowGeometryState { expanded: false, collapsed_bounds: None, collapsed_work_area: None }
+    WindowGeometryState {
+        expanded: false,
+        collapsed_bounds: None,
+        collapsed_work_area: None,
+    }
 }
 
 /// Fit a candidate window rect into a work area.
@@ -46,20 +55,44 @@ pub fn create_window_geometry_state() -> WindowGeometryState {
 /// larger than the work area minus a 24px margin). Collapsed windows are always
 /// 88x88. Mirrors `fitWindowToWorkArea` from the shared contract.
 pub fn fit_window_to_work_area(current: Rect, work_area: Rect, expanded: bool) -> Rect {
+    let available_width = work_area.width.max(1);
+    let available_height = work_area.height.max(1);
     let (width, height) = if expanded {
-        let width = work_area.width.saturating_sub(24).clamp(320, 660);
-        let height = work_area.height.saturating_sub(24).clamp(320, 760);
+        let width = work_area
+            .width
+            .saturating_sub(24)
+            .clamp(320, 660)
+            .min(available_width);
+        let height = work_area
+            .height
+            .saturating_sub(24)
+            .clamp(320, 760)
+            .min(available_height);
         (width, height)
     } else {
-        (88, 88)
+        (88.min(available_width), 88.min(available_height))
     };
-    let x = current.x.clamp(work_area.x, work_area.x + work_area.width - width);
-    let y = current.y.clamp(work_area.y, work_area.y + work_area.height - height);
-    Rect { x, y, width, height }
+    let max_x = work_area
+        .x
+        .saturating_add(available_width.saturating_sub(width));
+    let max_y = work_area
+        .y
+        .saturating_add(available_height.saturating_sub(height));
+    let x = current.x.clamp(work_area.x, max_x);
+    let y = current.y.clamp(work_area.y, max_y);
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 fn same_bounds(left: Rect, right: Rect) -> bool {
-    left.x == right.x && left.y == right.y && left.width == right.width && left.height == right.height
+    left.x == right.x
+        && left.y == right.y
+        && left.width == right.width
+        && left.height == right.height
 }
 
 /// Transition between collapsed and expanded states, mirroring
@@ -84,4 +117,34 @@ pub fn transition_window_expansion(
     let bounds = fit_window_to_work_area(restore_bounds, work_area, false);
     *state = create_window_geometry_state();
     (bounds, !same_bounds(current, bounds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiny_work_area_never_panics_or_places_window_outside_origin() {
+        let work = Rect {
+            x: -20,
+            y: 10,
+            width: 120,
+            height: 80,
+        };
+        let current = Rect {
+            x: 500,
+            y: 500,
+            width: 88,
+            height: 88,
+        };
+
+        let collapsed = fit_window_to_work_area(current, work, false);
+        let expanded = fit_window_to_work_area(current, work, true);
+
+        assert!(collapsed.x >= work.x && collapsed.x + collapsed.width <= work.x + work.width);
+        assert!(collapsed.y >= work.y && collapsed.y + collapsed.height <= work.y + work.height);
+        assert_eq!((expanded.x, expanded.y), (work.x, work.y));
+        assert!(collapsed.width <= work.width && collapsed.height <= work.height);
+        assert!(expanded.width <= work.width && expanded.height <= work.height);
+    }
 }

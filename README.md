@@ -14,16 +14,12 @@
 npm install
 ```
 
-两种壳层（数据格式与目录规则兼容）：
+唯一桌面入口为 Rust/Tauri：Vite + WebView2，开发时自动使用隔离临时数据目录。
 
 ```powershell
-# Rust/Tauri 壳层（推荐）：Vite + WebView2，自动使用隔离临时数据目录
-npm run dev                # 默认 Rust；也可 npm run dev:rust
+npm run dev                # 默认 Rust/Tauri；也可 npm run dev:rust
 # 复用此前开发数据（否则每次创建新的隔离目录）
 npm run dev:rust -- --data-root "C:\\你的开发数据目录"
-
-# Electron 壳层（回滚入口）
-npm run dev:electron
 ```
 
 `npm run dev:rust` 会在系统临时目录创建本次运行的隔离数据根（不触碰真实用户
@@ -54,7 +50,7 @@ cargo build --manifest-path src-tauri/Cargo.toml
 - 托盘菜单始终可打开画板、显示悬浮球或完全退出。
 - 开机自启动默认关闭，仅发布版可用。请先把解压目录放在稳定位置；移动/删除程序前先关闭自启动。
 - 目录选择只更新目录偏好，不自动迁移旧图片或改变实际数据根。
-- 不要让 Electron 和 Rust 同时写入同一图片库。
+- 开发数据默认写入本次运行的隔离目录；需要复用数据时显式传入 `--data-root`。
 
 重新生成便携包及 SHA256/体积报告：
 

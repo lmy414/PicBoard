@@ -7,7 +7,7 @@
 - ui：renderer/src/App.tsx、renderer/src/styles.css；可新建renderer/src/ui/Toast.tsx及motion.ts、Icons.tsx。负责现代卡片/布局/通知自动消失/浮层焦点/开合时序/控件接线。
 - ball：renderer/src/BloubBall.tsx、renderer/src/ball-settings.ts、新增renderer/src/ball-motion.css及BallIntake.tsx等ball专用模块；不得改App/styles.css。
 - controls：仅新增renderer/src/ui/ColorPicker.tsx、Select.tsx、DirectoryField.tsx、ShellSettings.tsx、controls.css及必要Popover.tsx；负责定制控件，自带CSS；不得改App/包配置/现有Rust。
-- native：src-tauri/、shared/image-board.ts、electron/、renderer/src/platform/、scripts/dev-rust.mjs；如必要可改package*.json。负责托盘/关闭语义/自启动/选择文件夹/原生配置。不改App/BloubBall/styles.css/ui组件。
+- native：src-tauri/、shared/image-board.ts、renderer/src/platform/、scripts/dev-rust.mjs；如必要可改package*.json。负责托盘/关闭语义/自启动/选择文件夹/原生配置。不改App/BloubBall/styles.css/ui组件。
 - 主代理：合并、冲突裁决、修正接缝、最终验收、发布构建/体积报告和README。子代理不自行发布/开机注册/安装到系统。
 
 ## 固定接口（不得各自发明）
@@ -28,7 +28,7 @@ export type CloseBehavior = 'float'|'tray'|'quit';
 export interface DesktopSettings { closeBehavior:CloseBehavior; autoStart:boolean; autoStartAvailable:boolean; }
 ImageBoardApi新增 getDesktopSettings():Promise<DesktopSettings>; setDesktopSettings(patch:{closeBehavior?:CloseBehavior;autoStart?:boolean}):Promise<DesktopSettings>; pickDirectory(initialPath?:string):Promise<string|null>。
 默认 closeBehavior='float'：closeWindow收起并保留悬浮球；tray：隐藏主窗但进程/托盘保留；quit：退出。托盘显示小球/打开画板/完全退出，系统关闭事件也遵循设置，不造成关闭递归。托盘打开/折叠必须同步React，不能只改原生窗口尺寸。
-为此新增可选 onExpandedChange?(listener:(expanded:boolean)=>void):()=>void；ui收到host事件更新expanded及清理交互，不能再次invoke造成循环。Tauri事件 'window:expanded-changed'，Electron同shape。
+为此新增可选 onExpandedChange?(listener:(expanded:boolean)=>void):()=>void；ui收到 Tauri host 事件更新 expanded 及清理交互，不能再次 invoke 造成循环。事件名为 `window:expanded-changed`。
 自启动默认关；开发/debug禁止注册debug exe，autoStartAvailable=false，UI说明发布版可用。release下用户显式开启才注册到当前用户，不提权；关闭删除本应用项。实际系统设置读回，不虚构成功；开发验证不得真的写系统启动项。
 目录选择使用host原生对话框，仅主窗口调用；取消null。可窄用途插件/受控命令，不开放通用shell/fs。关闭行为保存独立偏好文件，不改state.json业务结构，不混入图片库事务；隔离数据开发的偏好不得污染release。
 

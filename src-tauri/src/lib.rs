@@ -21,17 +21,19 @@ mod error;
 mod paths;
 mod platform;
 mod preferences;
+pub(crate) mod startup_readiness;
 mod storage;
 mod window_controller;
 mod window_geometry;
 
 use crate::commands::SharedStorage;
+use crate::startup_readiness::StartupReadiness;
 use crate::storage::ImageBoardStorage;
 use crate::window_controller::WindowController;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri::Listener;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 /// Data root override that takes precedence over everything else. Dev scripts
 /// pass `--data-root` so development never touches real user data.
@@ -73,7 +75,11 @@ fn install_preferences(app: &mut tauri::App) {
         match preferences::load_preference_export(&path) {
             Ok(export) => {
                 let normalized = preferences::normalize_export(export);
-                eprintln!("[host] loaded {} preference key(s) from {}", normalized.len(), path.display());
+                eprintln!(
+                    "[host] loaded {} preference key(s) from {}",
+                    normalized.len(),
+                    path.display()
+                );
                 store.install(normalized);
             }
             Err(error) => {
@@ -82,6 +88,30 @@ fn install_preferences(app: &mut tauri::App) {
         }
     }
     app.manage(store);
+}
+
+fn reveal_initial_window(
+    app: &tauri::AppHandle,
+    controller: &WindowController,
+    readiness: &StartupReadiness,
+    page_ready: bool,
+) {
+    let reveal = || {
+        let Some(window) = app.get_webview_window("main") else {
+            return false;
+        };
+        let visible = window.is_visible().unwrap_or(false);
+        if !visible && window.show().is_err() {
+            return false;
+        }
+        controller.start_cursor_tracking();
+        true
+    };
+    if page_ready {
+        let _ = readiness.page_ready_and_reveal(reveal);
+    } else {
+        let _ = readiness.placement_ready_and_reveal(reveal);
+    }
 }
 
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -102,6 +132,18 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let window_controller = WindowController::new(app.handle().clone());
     app.manage(window_controller.clone());
+    let readiness = StartupReadiness::default();
+    app.manage(readiness.clone());
+    let app_handle = app.handle().clone();
+
+    // Register before creating the webview. The renderer emits `host:ready`
+    // only once, so registering on the window after build can lose the event.
+    let ready_app = app_handle.clone();
+    let ready_controller = window_controller.clone();
+    let ready_state = readiness.clone();
+    let _ = app.listen("host:ready", move |_| {
+        reveal_initial_window(&ready_app, &ready_controller, &ready_state, true);
+    });
 
     // Create the main window hidden and undecorated.
     let url = if tauri::is_dev() {
@@ -109,6 +151,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         WebviewUrl::App("index.html".into())
     };
+    let page_app = app_handle.clone();
+    let page_controller = window_controller.clone();
+    let page_state = readiness.clone();
     let window = WebviewWindowBuilder::new(app, "main", url)
         .title("快捷图片画布")
         .inner_size(88.0, 88.0)
@@ -124,22 +169,31 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // when the native WebView2 drag/drop handler is disabled; otherwise the
         // webview swallows the OS-level drop before the DOM sees it.
         .disable_drag_drop_handler()
-        .on_page_load(|_webview, payload| {
+        .on_page_load(move |_webview, payload| {
             let event = match payload.event() {
                 tauri::webview::PageLoadEvent::Started => "Started",
                 tauri::webview::PageLoadEvent::Finished => "Finished",
             };
             eprintln!("[host] page load event: {event} url={}", payload.url());
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                // Native page-load finished is the fallback for a renderer
+                // `host:ready` event lost during initial navigation.
+                reveal_initial_window(&page_app, &page_controller, &page_state, true);
+            }
         })
         .build()?;
     window_controller.place_initial()?;
+    reveal_initial_window(&app_handle, &window_controller, &readiness, false);
 
     // Clean up background loops when the window is destroyed.
     let close_controller = window_controller.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Destroyed = event {
-            close_controller.cancel_drag();
-            close_controller.stop_cursor_tracking();
+            // Worker loops may be inside native window APIs that marshal back to
+            // the UI thread. Never join them from the UI destruction callback.
+            // Signal-only teardown keeps this UI callback non-blocking; worker
+            // handles are reclaimed on a separate thread.
+            close_controller.request_teardown();
         }
     });
 
@@ -147,21 +201,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // own action; quit lets the window close naturally.
     crate::desktop::install_close_behavior(&window)?;
 
-    // Show the window once the renderer reports readiness and start cursor
-    // tracking. A grace timer reveals it even if the page never reports.
-    let show_window = window.clone();
-    let ready_controller = window_controller.clone();
-    let _ = window.listen("host:ready", move |_| {
-        let _ = ready_controller.start_cursor_tracking();
-        if let Ok(visible) = show_window.is_visible() {
-            if !visible {
-                let _ = show_window.show();
-            }
-        }
-    });
-    // Readiness owns initial visibility. An unconditional delayed show would
-    // undo a deliberate tray-hide performed during the first seconds.
-
+    // Initial visibility is owned by the one-shot readiness state. An
+    // unconditional delayed show would undo a deliberate tray-hide.
 
     Ok(())
 }
@@ -194,5 +235,7 @@ pub fn run() {
             commands::set_desktop_settings,
             commands::pick_directory,
         ]);
-    builder.run(tauri::generate_context!()).expect("failed to run quick-image-board");
+    builder
+        .run(tauri::generate_context!())
+        .expect("failed to run quick-image-board");
 }

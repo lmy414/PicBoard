@@ -26,7 +26,12 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
     let quit = MenuItem::with_id(app, MENU_QUIT, "完全退出", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&open, &collapse, &PredefinedMenuItem::separator(app)?, &quit],
+        &[
+            &open,
+            &collapse,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
     )?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
@@ -44,7 +49,15 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
                 let window = handle
                     .get_webview_window("main")
                     .ok_or_else(|| AppError::message("主窗口不存在"))?;
+                if let Some(readiness) =
+                    handle.try_state::<crate::startup_readiness::StartupReadiness>()
+                {
+                    readiness.mark_user_shown();
+                }
                 window.show()?;
+                handle
+                    .state::<crate::window_controller::WindowController>()
+                    .start_cursor_tracking();
                 if expanded {
                     window.set_focus()?;
                 }
@@ -73,7 +86,15 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
                 let window = open_app2
                     .get_webview_window("main")
                     .ok_or_else(|| AppError::message("主窗口不存在"))?;
+                if let Some(readiness) =
+                    open_app2.try_state::<crate::startup_readiness::StartupReadiness>()
+                {
+                    readiness.mark_user_shown();
+                }
                 window.show()?;
+                open_app2
+                    .state::<crate::window_controller::WindowController>()
+                    .start_cursor_tracking();
                 window.set_focus()?;
                 crate::window_controller::set_window_expanded_state(&open_app2, true)?;
                 Ok(())

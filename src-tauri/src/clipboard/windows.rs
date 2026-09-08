@@ -22,17 +22,19 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
 use std::sync::OnceLock;
+use windows_sys::core::PCWSTR;
 use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL};
 use windows_sys::Win32::Graphics::Gdi::{
-    BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_BITFIELDS, BI_RGB, CreateCompatibleDC,
-    CreateDIBSection, DeleteDC, DeleteObject, DIB_RGB_COLORS, GetDIBits, GetObjectW, SelectObject,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDIBits, GetObjectW,
+    SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_BITFIELDS, BI_RGB, DIB_RGB_COLORS,
 };
-use windows_sys::core::PCWSTR;
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
 };
-use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
+use windows_sys::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+};
 use windows_sys::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_DIBV5, CF_HDROP};
 use windows_sys::Win32::UI::Shell::DROPFILES;
 
@@ -51,11 +53,21 @@ fn align4(value: usize) -> usize {
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+    u32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ])
 }
 
 fn read_i32(bytes: &[u8], offset: usize) -> i32 {
-    i32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+    i32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ])
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {
@@ -95,11 +107,16 @@ fn claimed_len(header_size: usize, extension: usize, pixel_len: usize) -> Result
         .ok_or_else(|| AppError::message("剪贴板 DIB 尺寸过大"))
 }
 
-/// Palette helper: `count` entries of 4 bytes (B,G,R,reserved) follow the
+/// Palette helper: entries of B,G,R,(reserved) or legacy B,G,R follow the
 /// header. The returned entries are stored as [R,G,B].
-fn read_palette(bytes: &[u8], offset: usize, count: usize) -> Result<Vec<[u8; 3]>, AppError> {
+fn read_palette(
+    bytes: &[u8],
+    offset: usize,
+    count: usize,
+    entry_size: usize,
+) -> Result<Vec<[u8; 3]>, AppError> {
     let size = count
-        .checked_mul(4)
+        .checked_mul(entry_size)
         .ok_or_else(|| AppError::message("剪贴板 DIB 尺寸过大"))?;
     let end = offset
         .checked_add(size)
@@ -109,7 +126,7 @@ fn read_palette(bytes: &[u8], offset: usize, count: usize) -> Result<Vec<[u8; 3]
     }
     let mut palette = Vec::with_capacity(count);
     for index in 0..count {
-        let base = offset + index * 4;
+        let base = offset + index * entry_size;
         palette.push([bytes[base + 2], bytes[base + 1], bytes[base]]);
     }
     Ok(palette)
@@ -136,7 +153,9 @@ fn with_clipboard<T>(f: impl FnOnce() -> Result<T, AppError>) -> Result<T, AppEr
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
         if !opened {
-            return Err(AppError::message("无法打开系统剪贴板（可能被其他程序占用）"));
+            return Err(AppError::message(
+                "无法打开系统剪贴板（可能被其他程序占用）",
+            ));
         }
         let result = f();
         CloseClipboard();
@@ -246,7 +265,11 @@ unsafe fn read_standard_png() -> Result<Option<Vec<u8>>, AppError> {
     GlobalUnlock(handle);
     let image = loaded?;
     let rgba = image.to_rgba8();
-    Ok(Some(encode_png(rgba.as_raw(), rgba.width(), rgba.height())?))
+    Ok(Some(encode_png(
+        rgba.as_raw(),
+        rgba.width(),
+        rgba.height(),
+    )?))
 }
 
 struct DibInfo {
@@ -262,8 +285,8 @@ struct DibInfo {
     alpha_mask: u32,
     /// Offset of the first pixel row (after header, trailing masks and palette).
     data_offset: usize,
-    /// Present for 1/4/8 bpp: `(palette offset in `bytes`, entry count)`.
-    palette: Option<(usize, usize)>,
+    /// Present for 1/4/8 bpp: `(palette offset in `bytes`, entry count, entry size)`.
+    palette: Option<(usize, usize, usize)>,
     /// Number of whole rows available after `data_offset`.
     pixel_len: usize,
 }
@@ -310,7 +333,11 @@ fn parse_dib_header(bytes: &[u8]) -> Result<DibInfo, AppError> {
     } else {
         bit_count = read_u16(bytes, 14);
         compression = read_u32(bytes, 16);
-        colors_used = if header_size >= 36 { read_u32(bytes, 32) } else { 0 };
+        colors_used = if header_size >= 36 {
+            read_u32(bytes, 32)
+        } else {
+            0
+        };
     }
     if !matches!(bit_count, 1 | 4 | 8 | 16 | 24 | 32) {
         return Err(AppError::message(format!(
@@ -341,7 +368,7 @@ fn parse_dib_header(bytes: &[u8]) -> Result<DibInfo, AppError> {
     let mut blue_mask = 0u32;
     let mut alpha_mask = 0u32;
     let mut trailing = 0usize;
-    if masked && (bit_count == 16 || bit_count == 32) {
+    if masked && matches!(bit_count, 16 | 24 | 32) {
         if layout.embedded_masks || header_size == 52 || header_size == 56 {
             if bytes.len() < 56 {
                 return Err(AppError::message("剪贴板 DIB 头不完整"));
@@ -372,27 +399,33 @@ fn parse_dib_header(bytes: &[u8]) -> Result<DibInfo, AppError> {
 
     // Palette handling for 1/4/8 bpp. A truncated palette is a hard error (the
     // rows reference it); a palette size larger than 2^bpp is rejected.
-    let mut palette: Option<(usize, usize)> = None;
+    let mut palette: Option<(usize, usize, usize)> = None;
     if bit_count <= 8 {
+        let capacity = 1usize << bit_count;
         let entries = if colors_used != 0 {
             colors_used as usize
         } else {
-            (1usize << bit_count).min(256)
+            capacity
         };
-        if entries > 256 {
-            return Err(AppError::message("剪贴板 DIB 调色板过大"));
+        if entries > capacity {
+            return Err(AppError::message("剪贴板 DIB 调色板超出位深容量"));
         }
+        let entry_size = if header_size == 12 { 3 } else { 4 };
         if entries > 0 {
             let palette_offset = header_size + trailing;
             let need = entries
-                .checked_mul(4)
+                .checked_mul(entry_size)
                 .and_then(|size| palette_offset.checked_add(size))
                 .ok_or_else(|| AppError::message("剪贴板 DIB 尺寸过大"))?;
             if need > bytes.len() {
                 return Err(AppError::message("剪贴板 DIB 调色板不完整"));
             }
-            palette = Some((palette_offset, entries));
+            palette = Some((palette_offset, entries, entry_size));
         }
+    }
+
+    if masked {
+        validate_bit_masks(red_mask, green_mask, blue_mask, alpha_mask, bit_count)?;
     }
 
     // Bounds-checked dimensions and allocation budget.
@@ -412,7 +445,9 @@ fn parse_dib_header(bytes: &[u8]) -> Result<DibInfo, AppError> {
         .checked_mul(bit_count as u64)
         .ok_or_else(|| AppError::message("剪贴板 DIB 尺寸过大"))?;
     let stride = align4(((row_bits + 7) / 8) as usize);
-    let palette_bytes = palette.map(|(_, count)| count * 4).unwrap_or(0);
+    let palette_bytes = palette
+        .map(|(_, count, entry_size)| count * entry_size)
+        .unwrap_or(0);
     let pixel_rows = stride
         .checked_mul(height as usize)
         .ok_or_else(|| AppError::message("剪贴板 DIB 尺寸过大"))?;
@@ -436,6 +471,55 @@ fn parse_dib_header(bytes: &[u8]) -> Result<DibInfo, AppError> {
         palette,
         pixel_len,
     })
+}
+
+fn validate_bit_masks(
+    red: u32,
+    green: u32,
+    blue: u32,
+    alpha: u32,
+    bit_count: u16,
+) -> Result<(), AppError> {
+    if red == 0 || green == 0 || blue == 0 {
+        return Err(AppError::message("剪贴板 DIB RGB 掩码必须非零"));
+    }
+    let allowed = match bit_count {
+        16 => 0x0000_ffff,
+        24 => 0x00ff_ffff,
+        32 => u32::MAX,
+        _ => return Err(AppError::message("剪贴板 DIB 掩码位宽无效")),
+    };
+    if (red | green | blue | alpha) & !allowed != 0 {
+        return Err(AppError::message("剪贴板 DIB 掩码超出像素位宽"));
+    }
+    let masks = [red, green, blue, alpha];
+    for (index, mask) in masks.iter().enumerate() {
+        if *mask == 0 && index == 3 {
+            continue;
+        }
+        let shifted = *mask >> mask.trailing_zeros();
+        if shifted == 0 || (shifted & shifted.wrapping_add(1)) != 0 {
+            return Err(AppError::message("剪贴板 DIB 掩码必须是连续位域"));
+        }
+    }
+    if (red & green) != 0
+        || (red & blue) != 0
+        || (green & blue) != 0
+        || (alpha != 0 && ((alpha & red) != 0 || (alpha & green) != 0 || (alpha & blue) != 0))
+    {
+        return Err(AppError::message("剪贴板 DIB 掩码不能重叠"));
+    }
+    let bits = [red, green, blue, alpha];
+    for mask in bits {
+        if mask != 0 {
+            let shift = mask.trailing_zeros();
+            let width = mask.count_ones();
+            if shift + width > bit_count as u32 {
+                return Err(AppError::message("剪贴板 DIB 掩码超出像素位宽"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Normalize a raw masked channel into 0..255 without u8 overflow: a 5-bit
@@ -480,7 +564,7 @@ fn decode_dib_bytes(bytes: &[u8]) -> Result<Option<(Vec<u8>, u32, u32)>, AppErro
     let mut rgba = vec![0u8; rgba_len];
 
     let palette = match info.palette {
-        Some((offset, count)) => Some(read_palette(bytes, offset, count)?),
+        Some((offset, count, entry_size)) => Some(read_palette(bytes, offset, count, entry_size)?),
         None => None,
     };
 
@@ -508,7 +592,9 @@ fn decode_dib_bytes(bytes: &[u8]) -> Result<Option<(Vec<u8>, u32, u32)>, AppErro
                     1 => (row[byte_index] >> (7 - (bit_index % 8))) & 0x01,
                     _ => unreachable!(),
                 };
-                let rgb = palette[value as usize];
+                let rgb = palette
+                    .get(value as usize)
+                    .ok_or_else(|| AppError::message("剪贴板 DIB 像素索引超出调色板范围"))?;
                 dest[x * 4..x * 4 + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
             }
         } else {
@@ -520,7 +606,7 @@ fn decode_dib_bytes(bytes: &[u8]) -> Result<Option<(Vec<u8>, u32, u32)>, AppErro
 
 fn direct_pixel(src: &[u8], info: &DibInfo) -> Result<[u8; 4], AppError> {
     let (channel_r, channel_g, channel_b): (u32, u32, u32);
-    let bits_per_channel: u8;
+    let (bits_r, bits_g, bits_b): (u8, u8, u8);
     match (info.compression, info.bit_count) {
         (0, 24) => return Ok([src[2], src[1], src[0], 255]),
         (0, 32) => return Ok([src[2], src[1], src[0], 255]),
@@ -529,14 +615,18 @@ fn direct_pixel(src: &[u8], info: &DibInfo) -> Result<[u8; 4], AppError> {
             channel_r = (value >> 10) & 0x1f;
             channel_g = (value >> 5) & 0x1f;
             channel_b = value & 0x1f;
-            bits_per_channel = 5;
+            bits_r = 5;
+            bits_g = 5;
+            bits_b = 5;
         }
         (3, 16) | (3, 24) | (3, 32) => {
             let value = raw_pixel_value(src, info)?;
             channel_r = (value & info.red_mask) >> info.red_mask.trailing_zeros();
             channel_g = (value & info.green_mask) >> info.green_mask.trailing_zeros();
             channel_b = (value & info.blue_mask) >> info.blue_mask.trailing_zeros();
-            bits_per_channel = (info.red_mask >> info.red_mask.trailing_zeros()).count_ones() as u8;
+            bits_r = (info.red_mask >> info.red_mask.trailing_zeros()).count_ones() as u8;
+            bits_g = (info.green_mask >> info.green_mask.trailing_zeros()).count_ones() as u8;
+            bits_b = (info.blue_mask >> info.blue_mask.trailing_zeros()).count_ones() as u8;
         }
         _ => {
             return Err(AppError::message(format!(
@@ -554,9 +644,9 @@ fn direct_pixel(src: &[u8], info: &DibInfo) -> Result<[u8; 4], AppError> {
         255
     };
     Ok([
-        scaled_channel(channel_r, bits_per_channel),
-        scaled_channel(channel_g, bits_per_channel),
-        scaled_channel(channel_b, bits_per_channel),
+        scaled_channel(channel_r, bits_r),
+        scaled_channel(channel_g, bits_g),
+        scaled_channel(channel_b, bits_b),
         alpha,
     ])
 }
@@ -667,7 +757,9 @@ pub fn write_image_files(paths: &[std::path::PathBuf]) -> Result<(), AppError> {
         if paths.len() == 1 {
             match build_bitmap(&paths[0]) {
                 Ok(Some(bitmap)) => {
-                    if SetClipboardData(CF_BITMAP as u32, bitmap as *mut core::ffi::c_void).is_null() {
+                    if SetClipboardData(CF_BITMAP as u32, bitmap as *mut core::ffi::c_void)
+                        .is_null()
+                    {
                         // The file list already succeeded; dropping the pixel
                         // format must not fail the whole copy.
                         DeleteObject(bitmap);
@@ -697,7 +789,10 @@ fn build_dropfiles(paths: &[std::path::PathBuf]) -> Result<HGLOBAL, AppError> {
     wide.push(0); // double NUL terminates the whole list
     let payload = wide.len() * 2;
     unsafe {
-        let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, DROPFILES_HEADER as usize + payload);
+        let handle = GlobalAlloc(
+            GMEM_MOVEABLE | GMEM_ZEROINIT,
+            DROPFILES_HEADER as usize + payload,
+        );
         if handle.is_null() {
             return Err(AppError::message("无法分配文件剪贴板内存"));
         }
@@ -706,26 +801,71 @@ fn build_dropfiles(paths: &[std::path::PathBuf]) -> Result<HGLOBAL, AppError> {
             let _ = GlobalFree(handle);
             return Err(AppError::message("无法锁定文件剪贴板内存"));
         }
-        let header = DROPFILES { pFiles: DROPFILES_HEADER, pt: std::mem::zeroed(), fNC: 0, fWide: 1 };
-        ptr::copy_nonoverlapping(&header as *const DROPFILES as *const u8, memory, DROPFILES_HEADER as usize);
-        ptr::copy_nonoverlapping(wide.as_ptr() as *const u8, memory.add(DROPFILES_HEADER as usize), payload);
+        let header = DROPFILES {
+            pFiles: DROPFILES_HEADER,
+            pt: std::mem::zeroed(),
+            fNC: 0,
+            fWide: 1,
+        };
+        ptr::copy_nonoverlapping(
+            &header as *const DROPFILES as *const u8,
+            memory,
+            DROPFILES_HEADER as usize,
+        );
+        ptr::copy_nonoverlapping(
+            wide.as_ptr() as *const u8,
+            memory.add(DROPFILES_HEADER as usize),
+            payload,
+        );
         GlobalUnlock(handle);
         Ok(handle)
     }
+}
+
+fn checked_image_byte_len(width: u32, height: u32) -> Option<usize> {
+    (width as u64)
+        .checked_mul(height as u64)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .and_then(|bytes| usize::try_from(bytes).ok())
+}
+
+fn validate_bitmap_dimensions(width: u32, height: u32) -> Result<usize, AppError> {
+    if width == 0 || height == 0 {
+        return Ok(0);
+    }
+    let pixels = (width as u64)
+        .checked_mul(height as u64)
+        .ok_or_else(|| AppError::message("要复制的图片尺寸过大"))?;
+    if pixels > MAX_PIXELS {
+        return Err(AppError::message("要复制的图片尺寸过大"));
+    }
+    checked_image_byte_len(width, height).ok_or_else(|| AppError::message("要复制的图片尺寸过大"))
 }
 
 /// Decode an image file and create a top-down 32bpp DIBSection whose memory the
 /// clipboard owns once SetClipboardData succeeds.
 fn build_bitmap(path: &Path) -> Result<Option<*mut core::ffi::c_void>, AppError> {
     let bytes = std::fs::read(path)?;
+    let reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .map_err(|error| AppError::message(format!("无法识别要复制的图片：{error}")))?;
+    let (source_width, source_height) = reader
+        .into_dimensions()
+        .map_err(|error| AppError::message(format!("无法读取要复制的图片尺寸：{error}")))?;
+    if validate_bitmap_dimensions(source_width, source_height)? == 0 {
+        return Ok(None);
+    }
     let image = image::load_from_memory(&bytes)
         .map_err(|error| AppError::message(format!("无法解码要复制的图片：{error}")))?;
+    let width = image.width();
+    let height = image.height();
+    let target_len = validate_bitmap_dimensions(width, height)?;
+    if target_len == 0 {
+        return Ok(None);
+    }
     let rgba = image.to_rgba8();
     let width = rgba.width();
     let height = rgba.height();
-    if width == 0 || height == 0 {
-        return Ok(None);
-    }
     let mut header: BITMAPINFOHEADER;
     let mut info: BITMAPINFO;
     let dc;
@@ -760,8 +900,7 @@ fn build_bitmap(path: &Path) -> Result<Option<*mut core::ffi::c_void>, AppError>
             }
             return Err(AppError::message("无法创建剪贴板位图"));
         }
-        let target =
-            std::slice::from_raw_parts_mut(bits as *mut u8, (width * height * 4) as usize);
+        let target = std::slice::from_raw_parts_mut(bits as *mut u8, target_len);
         for (index, pixel) in rgba.pixels().enumerate() {
             let offset = index * 4;
             target[offset] = pixel[2]; // B
@@ -777,7 +916,6 @@ fn build_bitmap(path: &Path) -> Result<Option<*mut core::ffi::c_void>, AppError>
 // In-memory DIB regression tests (no system clipboard, no GDI)
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +935,13 @@ mod tests {
     /// converts an RGBA8 pixel into its on-disk BGRA bytes.
     fn bgra(r: u8, g: u8, b: u8, a: u8) -> [u8; 4] {
         [b, g, r, a]
+    }
+
+    #[test]
+    fn checked_image_byte_len_rejects_multiplication_overflow() {
+        assert_eq!(checked_image_byte_len(1, 1), Some(4));
+        assert_eq!(checked_image_byte_len(u32::MAX, 0), Some(0));
+        assert_eq!(checked_image_byte_len(u32::MAX, u32::MAX), None);
     }
 
     #[test]
@@ -847,7 +992,7 @@ mod tests {
         dib.extend_from_slice(&0x7c00u32.to_le_bytes()); // R mask
         dib.extend_from_slice(&0x03e0u32.to_le_bytes()); // G mask
         dib.extend_from_slice(&0x001fu32.to_le_bytes()); // B mask
-        // One row of two 5:5:5 pixels; row stride = align4(2*2) = 4 bytes.
+                                                         // One row of two 5:5:5 pixels; row stride = align4(2*2) = 4 bytes.
         dib.extend_from_slice(&0x7fffu16.to_le_bytes()); // 31,31,31 -> white
         dib.extend_from_slice(&0x0000u16.to_le_bytes()); // 0,0,0 -> black
 
@@ -892,6 +1037,180 @@ mod tests {
         assert_eq!(&rgba[0..4], &[0, 0, 0, 255]);
         assert_eq!(&rgba[4..8], &[255, 255, 255, 255]);
         assert_eq!(&rgba[8..12], &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn dib_1bpp_decodes_packed_palette_indices() {
+        let mut dib = header40(8, 1, 1);
+        dib.extend_from_slice(&[0, 0, 255, 0]); // palette[0] = red
+        dib.extend_from_slice(&[255, 0, 0, 0]); // palette[1] = blue
+        dib.extend_from_slice(&[0b1010_0101, 0, 0, 0]);
+
+        let (rgba, width, height) = decode_dib_bytes(&dib).unwrap().unwrap();
+        assert_eq!((width, height), (8, 1));
+        for (index, expected) in [
+            [0, 0, 255, 255],
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+            [255, 0, 0, 255],
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(&rgba[index * 4..index * 4 + 4], &expected);
+        }
+    }
+
+    #[test]
+    fn dib_4bpp_decodes_packed_palette_indices() {
+        let mut dib = header40(4, 1, 4);
+        for index in 0..16u8 {
+            dib.extend_from_slice(&[index, index.wrapping_add(1), index.wrapping_add(2), 0]);
+        }
+        dib.extend_from_slice(&[0x1f, 0x30, 0, 0]); // indices 1, 15, 3, 0
+
+        let (rgba, width, height) = decode_dib_bytes(&dib).unwrap().unwrap();
+        assert_eq!((width, height), (4, 1));
+        for (index, palette_index) in [1u8, 15, 3, 0].into_iter().enumerate() {
+            let expected = [palette_index + 2, palette_index + 1, palette_index, 255];
+            assert_eq!(&rgba[index * 4..index * 4 + 4], &expected);
+        }
+    }
+
+    #[test]
+    fn dib_indexed_palette_rejects_colors_used_above_bpp_capacity() {
+        let mut dib = header40(1, 1, 1);
+        dib[32..36].copy_from_slice(&3u32.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+        dib.extend_from_slice(&[255, 255, 255, 0]);
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+
+        let error = decode_dib_bytes(&dib).unwrap_err();
+        assert!(format!("{error}").contains("调色板"), "{error}");
+    }
+
+    #[test]
+    fn dib_24bpp_bitfields_decodes_three_byte_pixels() {
+        let mut dib = header40(1, 1, 24);
+        dib[16..20].copy_from_slice(&BI_BITFIELDS.to_le_bytes());
+        dib.extend_from_slice(&0x00ff0000u32.to_le_bytes());
+        dib.extend_from_slice(&0x0000ff00u32.to_le_bytes());
+        dib.extend_from_slice(&0x000000ffu32.to_le_bytes());
+        dib.extend_from_slice(&[30, 20, 10, 0]); // B, G, R, row padding
+
+        let (rgba, width, height) = decode_dib_bytes(&dib).unwrap().unwrap();
+        assert_eq!((width, height), (1, 1));
+        assert_eq!(&rgba[0..4], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn dib_header_dimensions_above_pixel_budget_are_rejected() {
+        let dib = header40((MAX_PIXELS + 1) as i32, 1, 24);
+        let error = decode_dib_bytes(&dib).unwrap_err();
+        assert!(format!("{error}").contains("尺寸"), "{error}");
+    }
+
+    #[test]
+    fn dib_core_header_decodes_three_byte_palette_entries() {
+        let mut dib = vec![0u8; 12];
+        dib[0..4].copy_from_slice(&12u32.to_le_bytes());
+        dib[4..6].copy_from_slice(&2u16.to_le_bytes());
+        dib[6..8].copy_from_slice(&1u16.to_le_bytes());
+        dib[8..10].copy_from_slice(&1u16.to_le_bytes());
+        dib[10..12].copy_from_slice(&1u16.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 255]); // palette[0] = red (B, G, R)
+        dib.extend_from_slice(&[255, 0, 0]); // palette[1] = blue (B, G, R)
+        dib.extend_from_slice(&[0b0100_0000, 0, 0, 0]); // red, blue
+
+        let (rgba, width, height) = decode_dib_bytes(&dib).unwrap().unwrap();
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(&rgba[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&rgba[4..8], &[0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn dib_bitfields_zero_rgb_mask_is_rejected() {
+        let mut dib = header40(1, 1, 16);
+        dib[16..20].copy_from_slice(&BI_BITFIELDS.to_le_bytes());
+        dib.extend_from_slice(&0u32.to_le_bytes());
+        dib.extend_from_slice(&0x03e0u32.to_le_bytes());
+        dib.extend_from_slice(&0x001fu32.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+
+        let error = decode_dib_bytes(&dib).unwrap_err();
+        assert!(format!("{error}").contains("掩码"), "{error}");
+    }
+
+    #[test]
+    fn dib_bitfields_overlapping_rgb_masks_are_rejected() {
+        let mut dib = header40(1, 1, 16);
+        dib[16..20].copy_from_slice(&BI_BITFIELDS.to_le_bytes());
+        dib.extend_from_slice(&0x7c00u32.to_le_bytes());
+        dib.extend_from_slice(&0x7c00u32.to_le_bytes());
+        dib.extend_from_slice(&0x001fu32.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+
+        let error = decode_dib_bytes(&dib).unwrap_err();
+        assert!(format!("{error}").contains("掩码"), "{error}");
+    }
+
+    #[test]
+    fn dib_bitfields_non_contiguous_mask_is_rejected() {
+        let mut dib = header40(1, 1, 16);
+        dib[16..20].copy_from_slice(&BI_BITFIELDS.to_le_bytes());
+        dib.extend_from_slice(&0x5400u32.to_le_bytes());
+        dib.extend_from_slice(&0x03e0u32.to_le_bytes());
+        dib.extend_from_slice(&0x001fu32.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+
+        let error = decode_dib_bytes(&dib).unwrap_err();
+        assert!(format!("{error}").contains("掩码"), "{error}");
+    }
+
+    #[test]
+    fn dib_bitfields_channels_scale_using_their_own_widths() {
+        let mut dib = header40(1, 1, 16);
+        dib[16..20].copy_from_slice(&BI_BITFIELDS.to_le_bytes());
+        dib.extend_from_slice(&0xf800u32.to_le_bytes());
+        dib.extend_from_slice(&0x07e0u32.to_le_bytes());
+        dib.extend_from_slice(&0x001fu32.to_le_bytes());
+        dib.extend_from_slice(&0xffffu16.to_le_bytes());
+        dib.extend_from_slice(&[0, 0]);
+
+        let (rgba, _, _) = decode_dib_bytes(&dib).unwrap().unwrap();
+        assert_eq!(&rgba[0..4], &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn dib_indexed_palette_value_out_of_range_is_rejected() {
+        let mut dib = header40(1, 1, 8);
+        dib[32..36].copy_from_slice(&2u32.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 0, 0]);
+        dib.extend_from_slice(&[255, 255, 255, 0]);
+        dib.extend_from_slice(&[2, 0, 0, 0]);
+
+        let error = decode_dib_bytes(&dib).unwrap_err();
+        assert!(format!("{error}").contains("调色板"), "{error}");
+    }
+
+    #[test]
+    fn bitmap_copy_rejects_dimensions_over_allocation_budget() {
+        assert!(validate_bitmap_dimensions(1, 1).is_ok());
+        assert!(validate_bitmap_dimensions(u32::MAX, u32::MAX).is_err());
+        assert!(validate_bitmap_dimensions((MAX_PIXELS + 1) as u32, 1).is_err());
+    }
+
+    #[test]
+    fn checked_image_byte_len_handles_pixel_and_byte_boundaries() {
+        assert_eq!(checked_image_byte_len(1, 1), Some(4));
+        assert_eq!(checked_image_byte_len(u32::MAX, 0), Some(0));
+        assert_eq!(checked_image_byte_len(u32::MAX, u32::MAX), None);
     }
 
     #[test]

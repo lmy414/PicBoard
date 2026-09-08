@@ -1,4 +1,6 @@
-# 修复验证记录
+# 修复验证记录（历史）
+
+> 本文记录迁移前的修复验证，仅供历史查阅。当前桌面入口固定为 Rust/Tauri，旧桌面壳相关段落不可执行；当前命令与范围以 README 和 `RUST-SHELL-MIGRATION.md` 文末收尾说明为准。
 
 验证日期：2026-09-06
 
@@ -6,7 +8,7 @@
 
 - P0 坐标与可见性：导入位置按当前视角和视口中心计算；允许负坐标；画布世界不再使用固定伪边界；增加“定位全部”；缩放围绕视口中心。
 - P0 画布状态：活动画布通过主进程接口持久化；每个画布保存 `viewport`；切换画布清空选择。
-- P0 数据安全：保存请求串行排队；临时文件写入并同步后替换；旧状态保留为 `state.json.bak`；损坏状态复制为 `state.json.corrupt-*`，可从有效备份恢复并向界面报告；文件移动/删除使用 `.trash` 中转并在提交失败时回滚。
+- P0 数据安全：保存请求串行排队；临时文件写入并同步后替换；旧状态保留为 `state.json.bak`；损坏状态复制为 `state.json.corrupt-*`，可从有效备份恢复并向界面报告；文件移动/删除使用 `.trash` 中转并在提交失败时恢复。
 - P1 交互：图片移动有阈值、指针取消不提交；拖动画布与窗口拖动区域相互独立；应用内输入/确认弹窗替换 `window.prompt` / `window.confirm`；分类库显示重新分类与复制快捷操作；批量复制不再静默只取第一张。
 - P1 分类与文件：新分类目录使用分类稳定 ID；分类关系和实际文件移动一起提交；删除画布/从画布移除时只删除未分类文件，已分类文件保留。
 - P2 可用性：预览使用 `contain` 保持图片比例；文件名继续截断；状态操作返回已加载预览，避免移动/切换视角时再次读取全库原图；窗口展开高度同时由主进程工作区几何和 CSS `height: 100%` 约束。
@@ -25,26 +27,25 @@ npm run build
 
 - typecheck：通过。
 - `npm test`：6/6 通过，所有数据写入均使用独立系统临时目录；另含设置页与 bloub 接入回归检查。
-- 完整构建：Vite renderer 与 Electron TypeScript 均通过。
+- 完整构建：Vite renderer 构建通过；Rust host 构建由 Cargo 流程负责。
 - 存储测试覆盖：当前视角导入坐标、负坐标移动、并发导入串行化、活动画布/视角重启持久化、分类稳定目录、删除画布资源规则、坏 JSON 保护与备份恢复。
 - 文件机制测试覆盖：`DROPFILES` 头、Unicode 标志和多路径双 NUL UTF-16LE 列表。
 - 窗口几何测试覆盖：屏幕边缘展开及收起时的工作区内边界。
 
-## Electron 自测
+## 历史桌面壳自测（已完成/历史）
 
-使用独立 `--user-data-dir` 启动已构建应用，并通过本应用自己的 DevTools 调试端点检查：
+以下记录来自迁移前的旧桌面壳验证，仅保留为历史证据，不能作为当前可执行入口或当前 Rust/Tauri 验证结论。当前运行应使用 Rust/Tauri host 与系统 WebView2。
 
 - 初始折叠界面可渲染，显示当前画布和图片数量。
 - 点击展开后 `.app-shell` 实际渲染高度为 `760px`，按钮包含画布、分类库、收起、退出和“定位全部”。
 - 新建画布后标签数量和活动标签更新。
 - 重命名使用应用内输入弹窗，确认后活动标签文本更新，弹窗消失。
-- 启动时使用的实际 Electron runtime 文件为 `node_modules/electron/dist/version = 32.0.0`；没有把 `package.json` 声明版本当作 runtime 版本，也没有升级 Electron。
 
 ## 未验证边界
 
 - 原生 GUI CUA 当前不可用，因此没有操作真实文件管理器或其他桌面应用；复制到系统文件粘贴目标、跨应用拖出后的最终接收结果未做实测，不能宣称已通过。
-- 源码使用 Electron 主进程的 `clipboard.writeBuffer("CF_HDROP", buffer, "clipboard")`，buffer 是实际 Windows `DROPFILES` 结构和双 NUL UTF-16LE 文件列表，不是同名自定义文本格式。跨应用最终验收仍需在可用的 Windows 文件管理器/目标应用中补测。
-- 本次 Electron 自测没有伪造系统文件拖入或跨应用剪贴板图片；导入/粘贴的持久化逻辑由隔离存储测试覆盖，真实桌面拖入、Ctrl+V 图片来源和最终跨应用文件粘贴保持未验证。
+- 旧桌面壳曾使用系统文件剪贴板格式；当前实现由 Rust host 负责，跨应用最终验收仍需在可用的 Windows 文件管理器/目标应用中补测。
+- 历史桌面壳自测没有伪造系统文件拖入或跨应用剪贴板图片；当前 Rust/Tauri 导入与粘贴仍需按设备条件进行真实跨应用验收。
 - 新设置页的小球动画通过类型检查、生产构建和当前开发窗口启动路径验证；由于本工具原生 GUI CUA 不可用，未宣称完成真实桌面点击、跨应用路径选择或系统级视觉验收。
 - 本次复核补齐 `CollapsedBall` 长按拖动与 `MiniMap` 常驻导航组件，并清理重复复制函数；`npm run typecheck`、`npm test`（6/6）和 `npm run build` 均通过。
 - 文件拖出入口已从画布 JSX 操作路径移除，画布工具提示改为 Ctrl+C 复制文件；保留 `CF_HDROP` 系统剪贴板复制接口。
@@ -64,13 +65,13 @@ npm run build
 - 快捷键仅保留：`Delete/Backspace` 从当前画布移除选中图片，`Ctrl/Cmd+C` 复制选中文件，`Ctrl/Cmd+V` 粘贴图片；输入框内不拦截这些按键。
 - 小球尺寸变更后重新启动开发窗口使主进程窗口几何生效；未触碰现有图片和状态数据。
 - 小球视觉修正：不再使用字符或单纯黑色 CSS 色块，改为 bloub 的主体路径、状态驱动和眼睛镂空；项目保留来源声明及 `renderer/src/third-party/bloub/LICENSE` MIT 许可文件。
-- 小球视线：由仅响应自身 hover 改为 Electron 主进程 `screen.getCursorScreenPoint()` 的低频桌面坐标同步，并保留 renderer `pointermove` 兜底，根据鼠标位置持续更新 bloub 引擎的 yaw/pitch；关闭“跟随指针”后恢复自动游移。
+- 小球视线：由宿主提供的低频桌面坐标同步，并保留 renderer `pointermove` 兜底，根据鼠标位置持续更新 bloub 引擎的 yaw/pitch；关闭“跟随指针”后恢复自动游移。
 - 小球 hover：鼠标进入小球时触发一次 Q 弹压缩回弹、轻微提亮、环形呼吸和三枚小粒子；移出后立即收回，且不改变随机表情状态机。
 
 ## 设置与 bloub 复用验证（2026-09-06）
 
 - `npm run typecheck`：通过。
 - `npm test`：6/6 通过；既有隔离临时目录存储、坐标、坏 JSON 恢复、CF_HDROP 和窗口几何覆盖未回归，并通过设置页与 bloub 接入回归检查。
-- `npm run build`：通过；renderer 已实际打包 `BloubBall` 和 vendored bloub engine，Electron 主进程 TypeScript 通过。
-- `node_modules/electron/dist/version`：`32.0.0`；没有以 `package.json` 声明版本替代实际 runtime，也没有升级 Electron。
+- `npm run build`：通过；renderer 已实际打包 `BloubBall` 和 vendored bloub engine。Rust host 构建由 Cargo 流程负责。
+- 当前入口固定为 Rust/Tauri；不再维护旧桌面壳 runtime 或其版本检查。
 - 许可来源：[jeremy-prt/bloub](https://github.com/jeremy-prt/bloub)，完整许可保留在 `renderer/src/third-party/bloub/LICENSE`，来源说明保留在同目录 `NOTICE.md`。

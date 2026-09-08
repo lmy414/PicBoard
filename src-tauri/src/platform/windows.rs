@@ -26,17 +26,32 @@ pub fn cursor_position() -> Result<(i32, i32), AppError> {
 /// mouse button is currently up. Used as a host-side drag fallback because the
 /// renderer may miss pointerup when the button is released outside the window.
 #[cfg(windows)]
+fn left_button_is_released(state: i16) -> bool {
+    (state as u16 & 0x8000) == 0
+}
+
+#[cfg(windows)]
 pub fn left_button_released() -> bool {
     const VK_LBUTTON: i32 = 0x01;
-    const KEY_UP: i16 = 0;
     unsafe {
-        // Short negative means "pressed"; zero means up.
-        windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_LBUTTON) as i16
-            == KEY_UP
+        left_button_is_released(
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_LBUTTON) as i16,
+        )
     }
 }
 
 #[cfg(not(windows))]
 pub fn left_button_released() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn left_button_release_ignores_async_transition_bit() {
+        assert!(super::left_button_is_released(0));
+        assert!(super::left_button_is_released(1));
+        assert!(!super::left_button_is_released(i16::MIN));
+        assert!(!super::left_button_is_released(i16::MIN | 1));
+    }
 }

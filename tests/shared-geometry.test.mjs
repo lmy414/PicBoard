@@ -1,23 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const neutralLook = await import("../dist-electron/shared/look-geometry.js");
-const legacyLook = await import("../dist-electron/electron/main/look-geometry.js");
-const neutralMiniMap = await import("../dist-electron/shared/minimap-geometry.js");
-const legacyMiniMap = await import("../dist-electron/electron/main/minimap-geometry.js");
-
-function assertSameLook(input, expected) {
-  assert.deepEqual(neutralLook.pointerToLookTarget(...input), expected);
-  assert.deepEqual(legacyLook.pointerToLookTarget(...input), expected);
-  assert.deepEqual(neutralLook.pointerToLookTarget(...input), legacyLook.pointerToLookTarget(...input));
-}
+const look = await import("../shared/look-geometry.ts");
+const miniMap = await import("../shared/minimap-geometry.ts");
 
 test("pointer look mapping keeps fixed bounded outputs for normal, extreme, and invalid input", () => {
-  assertSameLook([0, 0], { yaw: 0, pitch: -0 });
-  assertSameLook([0.5, -0.25, 20, 10], { yaw: 10, pitch: 2.5 });
-  assertSameLook([3, 4, 10, 5], { yaw: 6, pitch: -4 });
-  assertSameLook([Number.NaN, Number.POSITIVE_INFINITY], { yaw: 0, pitch: -0 });
-  assertSameLook([1, 0, Number.NaN, -1], { yaw: 28, pitch: -0 });
+  assert.deepEqual(look.pointerToLookTarget(0, 0), { yaw: 0, pitch: -0 });
+  assert.deepEqual(look.pointerToLookTarget(0.5, -0.25, 20, 10), { yaw: 10, pitch: 2.5 });
+  assert.deepEqual(look.pointerToLookTarget(3, 4, 10, 5), { yaw: 6, pitch: -4 });
+  assert.deepEqual(look.pointerToLookTarget(Number.NaN, Number.POSITIVE_INFINITY), { yaw: 0, pitch: -0 });
+  assert.deepEqual(look.pointerToLookTarget(1, 0, Number.NaN, -1), { yaw: 28, pitch: -0 });
 });
 
 test("mini-map projection preserves negative coordinates, zoom, image bounds, and inverse navigation", () => {
@@ -33,11 +25,7 @@ test("mini-map projection preserves negative coordinates, zoom, image bounds, an
     viewport: { x: 26, y: 26, width: 8, height: 8 },
   };
 
-  const neutral = neutralMiniMap.createMiniMapGeometry(images, viewport, 60, 60);
-  const legacy = legacyMiniMap.createMiniMapGeometry(images, viewport, 60, 60);
-  assert.deepEqual(neutral, expected);
-  assert.deepEqual(legacy, expected);
-  assert.deepEqual(neutral, legacy);
-  assert.deepEqual(neutralMiniMap.miniMapToWorld(neutral, 30, 30), { x: 0, y: 0 });
-  assert.deepEqual(legacyMiniMap.miniMapToWorld(legacy, 30, 30), { x: 0, y: 0 });
+  const geometry = miniMap.createMiniMapGeometry(images, viewport, 60, 60);
+  assert.deepEqual(geometry, expected);
+  assert.deepEqual(miniMap.miniMapToWorld(geometry, 30, 30), { x: 0, y: 0 });
 });

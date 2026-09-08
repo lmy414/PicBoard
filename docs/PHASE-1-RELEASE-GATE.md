@@ -33,7 +33,7 @@
 - **前置条件：Windows x64 + 系统Microsoft Edge WebView2 Evergreen Runtime。** 未捆绑固定运行时、不承诺无WebView2时可直接运行。
 - 关闭方式：float默认保留小球；tray隐藏；quit全退。托盘提供打开/显示球/退出。
 - 发布版自启动开关可用，默认关闭；只在用户显式切换时修改当前用户Run项。将解压目录放在固定位置后再开启，移走程序前关闭。
-- 默认图片库位于`%APPDATA%\quick-image-board\quick-image-board`，不是ZIP目录。不要与Electron同时写同一库。
+- 默认图片库位于`%APPDATA%\quick-image-board\quick-image-board`，不是ZIP目录；开发运行如需其他位置请显式传入 `--data-root`。
 - 目录选择仅改变既有目录偏好，不自动改变实际库根或迁移旧文件；这是已确认范围，不承诺不存在的路径迁移功能。
 - 未签名便携应用，没有安装器/自动更新；Windows可能显示未知发布者提示。
 

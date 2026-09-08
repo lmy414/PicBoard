@@ -28,7 +28,7 @@ Quick Image Board / Phase 1 Windows portable
 Extract this entire archive to a stable local directory and run quick-image-board.exe.
 Requires the Microsoft Edge WebView2 Evergreen Runtime installed on this computer.
 WebView2 and Windows system components are NOT bundled. This build is unsigned.
-Do not run Electron and this application against the same image library simultaneously.
+This Rust/Tauri application uses the library configured by its Rust host; keep backups before using preview builds.
 Keep this folder in a stable location before enabling startup at login in Settings.
 The startup option is off by default. Disable it before moving or deleting this folder.
 The tray menu provides a full Quit action independently of the configured window-close behavior.

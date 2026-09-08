@@ -15,7 +15,7 @@
 - 通知2秒自动结束，替换消息时清理旧计时，悬停/焦点暂停剩余时间，错误可关闭。
 - 托盘打开画板/显示悬浮球/完全退出；关闭默认float，可选tray/quit。
 - 自启动默认关，debug不可用；release只有用户主动选择才写当前用户Run项。
-- Rust开发入口默认npm run dev，Electron备用dev:electron；dev:rust可用--data-root复用明确目录。
+- Rust/Tauri 是唯一开发入口：`npm run dev`（等同 `npm run dev:rust`）；可用 `--data-root` 复用明确目录。
 
 ## 主代理裁决与修正
 - Toast原候选ref修改不触发退场渲染、暂停未保留剩余时间：重写成以消息id挂载的独立组件。

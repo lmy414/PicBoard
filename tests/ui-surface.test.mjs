@@ -45,14 +45,14 @@ test("canvas authorization iteration keeps image intent and keyboard guards expl
 
   assert.match(app, /const \[hoveredId, setHoveredId\]/);
   assert.match(app, /previewId[^\n]*selectedIds[^\n]*hoveredId/);
-  assert.match(app, /!expanded \|\| busy/);
+  assert.match(app, /!panelVisible \|\| busy/);
   assert.match(app, /contenteditable=true/);
   assert.match(app, /onDoubleClick/);
   assert.match(app, /requestAnimationFrame/);
   assert.match(app, /onLostPointerCapture/);
   assert.match(app, /dragDepthRef/);
   assert.match(app, /onDragEnter/);
-  assert.match(app, /dropFeedback/);
+  assert.match(app, /dropActive/);
   assert.match(app, /library-card[^\n]*onDoubleClick/);
   assert.match(app, /showRemove=\{false\}/);
   assert.match(app, /setSelectedIds\(\[\]\)/);

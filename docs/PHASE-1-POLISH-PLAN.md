@@ -54,7 +54,7 @@
 | A11 | `App.tsx:Dialog,QuickPreview,CollapsedBall` | 对话框缺完整焦点圈定/恢复；确认框无统一Esc处理；小球用div，无键盘打开语义 | 保留现有操作，补键盘/焦点与可访问状态，不新增快捷键体系 |
 | A12 | `App.tsx:SettingsPage` | 大标题、英文装饰、多卡片堆叠；三列长路径输入；路径偏好并不改变实际存储 | 减标题装饰，改紧凑分组；路径逐行显示并明确“偏好，不迁移” |
 | A13 | `App.tsx:MiniMap` | 指针移动每次导航都经persistViewport调用后端并应用完整状态 | 显示逐帧更新，持久化合并到结束/必要节流；保留最终视角与失败处理 |
-| A14 | `styles.css:.window-drag-region`；Tauri adapter | 顶栏拖动依赖Electron的-webkit-app-region，不能据此认定WebView2等价 | 原生复核；必要时接入现有start/endWindowDrag，仅覆盖顶栏空白区 |
+| A14 | `styles.css:.window-drag-region`；Tauri adapter | 顶栏拖动依赖宿主窗口行为，不能只据此认定WebView2等价 | 原生复核；必要时接入现有start/endWindowDrag，仅覆盖顶栏空白区 |
 | A15 | `App.tsx:SettingsPage`：`input type="color"`、原生`select` | 拾色器/选项弹出层脱离产品样式；不是改边框就能解决 | 自定义轻量拾色popover、可访问listbox与统一popover壳 |
 | A16 | `styles.css`：`.collapsed-shell span` 与 `.drop-feedback` | 前者选择器特异性更高，给所有后代span施加margin-top:2px、line-height:16px、font-size:11px、muted颜色；徽章的局部规则无法完全覆盖；字形✓还有字体基线偏差 | 去后代span广泛规则；徽章定位与动效分层；SVG勾以viewBox中心对齐 |
 | A17 | `BloubBall.tsx`、`third-party/bloub/repere.ts` | 当前只有身体/眼睛/通知缺口，没有吞图mouth通道；68px SVG对应316 viewBox，半径100的身体静置直径约43px，身体缩放6%仅约2.6px，很难表达“吃图” | 交互态增加独立SVG口型与接收物；量实际显示尺寸，不用整体弹性代替张口 |
@@ -158,9 +158,9 @@
 
 **必须区分两个范围：**
 1. 本轮纳入：把现有路径偏好的手输改为点选，保留可选手动编辑；标题明确“目录偏好”，提示“不会移动现有文件，也不会切换本次图片库”。不能显示“已更换存储位置”。
-2. 尚未批准：更改真实数据根、多个分类目录分别写文件、移动旧图片/切换库。这涉及原存储相对路径、事务、回滚与双壳兼容，不是选目录按钮的附带行为。如果用户想要选完立即生效，须先单列方案确认。
+2. 尚未批准：更改真实数据根、多个分类目录分别写文件、移动旧图片/切换库。这涉及原存储相对路径、事务与数据兼容，不是选目录按钮的附带行为。如果用户想要选完立即生效，须先单列方案确认。
 
-Rust端使用窄用途目录选择器（仅主窗、directory=true、单选），Electron备用入口提供等价选择能力。不把通用文件系统权限暴露给网页；目录选择本身不创建目录/读图片/移动数据。对话框焦点返回调用按钮，打开时不意外触发窗口拖动。
+Rust/Tauri 端使用窄用途目录选择器（仅主窗、directory=true、单选）。不把通用文件系统权限暴露给网页；目录选择本身不创建目录/读图片/移动数据。对话框焦点返回调用按钮，打开时不意外触发窗口拖动。
 
 ## 5. 动效方案：有弹性，但能立即停下来
 
@@ -272,7 +272,7 @@ motion控制幅度（0=没有非必要形变）；speed控制时长/时钟速率
 - `renderer/src/App.tsx`：窗口过渡状态、通知、弹层/焦点、空态层级、控件布局、小地图提交节奏。
 - 可新增少量专用模块：`renderer/src/ui/motion.ts`、`Icons.tsx`、`Popover.tsx`、`ColorPicker.tsx`、`Select.tsx`、`Toast.tsx`，以及`BallIntake.tsx`口型/接收物层；共享overlay定位/键盘规则，避免复制多套实现，不引入整套重型组件库。
 - `renderer/src/platform/tauri-adapter.ts` / `src-tauri/src/window_controller.rs`：仅在明确的窗口生命周期/订阅问题需要时最小修改，先报告原因。
-- 目录选择作为本次明确列出的设置辅助能力：可新增`renderer/src/platform/directory-picker.ts`及对应Tauri选择器注册/最小权限；Electron端通过preload/main受控IPC调用`dialog.showOpenDialog`。优先已有稳定对话框API或窄用途插件；若引入依赖真实更新锁文件，不扩大通用文件系统/shell权限，不为方便让renderer任意读磁盘。
+- 目录选择作为本次明确列出的设置辅助能力：可新增`renderer/src/platform/directory-picker.ts`及对应Tauri选择器注册/最小权限。优先已有稳定对话框API或窄用途插件；若引入依赖真实更新锁文件，不扩大通用文件系统/shell权限，不为方便让renderer任意读磁盘。
 - 验收记录：`docs/PHASE-1-ACCEPTANCE.md`（新建，最终由主代理确认）。
 
 默认禁止改动：存储格式、数据根、剪贴板解码/复制逻辑、导入类型、业务命令语义、第三方引擎主体及许可证。拖入开关与刚修好的DIB逻辑作为保护项。
@@ -331,7 +331,7 @@ motion控制幅度（0=没有非必要形变）；speed控制时长/时钟速率
 1. 用户确认本方案 → V4f实施 → 主代理验收与必要修正 → 用户最终体验确认。
 2. `docs/PHASE-1-ACCEPTANCE.md`记录实际版本、完成项、证据、明确未验项、已接受剩余风险。
 3. 本地Git保存当前功能基线及最终已验收源码（用户确认本方案时一并确认是否允许本地提交；不push、不发布、不打标签到远端）。排除缓存、用户数据、临时录屏/日志，保留Cargo.lock/第三方NOTICE。
-4. README明确Rust启动与Electron备用入口；默认是否将npm run dev切为Rust由本次方案确认项决定，不混淆。
+4. README明确 Rust/Tauri 是唯一启动入口，`npm run dev` 默认走隔离的 Rust 开发脚本。
 5. 停止实现/监控任务；若应用留给用户使用，记录对应进程和数据路径，不遗留测试实例。
 6. 分发50MB、签名/安装器、未覆盖的特殊设备兼容继续列为后续发布门槛；没有产物实测就不能声明50MB已达标或完成发布。
 
@@ -343,7 +343,7 @@ motion控制幅度（0=没有非必要形变）；speed控制时长/时钟速率
 - [ ] 不做原生窗口逐帧缩放；采用可靠的开合状态与内容轻过渡。
 - [ ] 完成第4–7节UI/交互打磨，包含现代卡片、自定义拾色/下拉框、目录选择、自动消失通知、可见口型吞图和徽章对齐；不增加其他业务，确认后由V4f high实施、主代理最终验收。
 - [ ] 路径选择本轮只改善目录输入体验，不改变实际读写目录或自动迁移；若期望选择后真正切库/存图，需要另行明确数据安全方案，不隐式实现。
-- [ ] 第一阶段收尾允许本地Git提交，不push/发布；保留Electron回滚。
-- [ ] 收尾将 `npm run dev` 默认切为Rust（推荐）；`dev:electron`保留。若不确认，维持现状并明确使用dev:rust。
+- [ ] 第一阶段收尾允许本地Git提交，不push/发布；保留迁移历史记录，旧壳回滚入口标记为历史且不可执行。
+- [ ] 收尾将 `npm run dev` 默认固定为 Rust/Tauri；不再提供旧壳开发脚本。
 
 GrokBot参考视频若后续提供，仅用于对齐振幅/回弹节奏，不作为开始实现的强制依赖；若与本方案有显著差异先调整参数决策，不追加功能。

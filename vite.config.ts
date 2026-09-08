@@ -10,7 +10,7 @@ export default defineConfig({
     watch: {
       // Rust build output changes constantly under tauri dev; watching the
       // dll/executables on Windows triggers EBUSY and kills Vite.
-      ignored: ["**/src-tauri/target/**", "**/dist-electron/**", "**/dist/**"],
+      ignored: ["**/src-tauri/target/**", "**/dist/**"],
     },
   },
 });

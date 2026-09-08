@@ -12,8 +12,10 @@
 //! `prevent_close`; the renderer is notified via `window:expanded-changed` so
 //! UI state and the real window never disagree.
 
-use crate::desktop::prefs::{load as load_prefs, save as save_prefs, CloseBehavior, DesktopPreferences};
-use crate::desktop::{AutoStartManager, setup_tray};
+use crate::desktop::prefs::{
+    load as load_prefs, save as save_prefs, CloseBehavior, DesktopPreferences,
+};
+use crate::desktop::{setup_tray, AutoStartManager};
 use crate::error::AppError;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -34,7 +36,10 @@ pub struct DesktopState {
 
 impl DesktopState {
     pub fn current(&self) -> DesktopPreferences {
-        self.prefs.lock().unwrap_or_else(|poison| poison.into_inner()).clone()
+        self.prefs
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
     }
 }
 
@@ -82,7 +87,10 @@ pub fn update_settings(
         prefs.auto_start = enabled;
     }
     save_prefs(&state.data_root, &prefs)?;
-    *state.prefs.lock().unwrap_or_else(|poison| poison.into_inner()) = prefs.clone();
+    *state
+        .prefs
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner()) = prefs.clone();
     Ok(prefs)
 }
 
@@ -115,8 +123,17 @@ pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<()
             Ok(())
         }
         CloseBehavior::Float => {
+            // A user close is a normal drag end context: stop polling without
+            // flushing a stale candidate, then collapse the window.
+            app.state::<crate::window_controller::WindowController>()
+                .cancel_drag();
             crate::window_controller::set_window_expanded_state(app, false)?;
             if let Some(window) = app.get_webview_window("main") {
+                if let Some(readiness) =
+                    app.try_state::<crate::startup_readiness::StartupReadiness>()
+                {
+                    readiness.mark_user_shown();
+                }
                 window.show()?;
             }
             Ok(())
@@ -125,8 +142,13 @@ pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<()
             let window = app
                 .get_webview_window("main")
                 .ok_or_else(|| AppError::message("主窗口不存在"))?;
-            app.state::<crate::window_controller::WindowController>().cancel_drag();
-            app.state::<crate::window_controller::WindowController>().stop_cursor_tracking();
+            if let Some(readiness) = app.try_state::<crate::startup_readiness::StartupReadiness>() {
+                readiness.mark_user_hidden();
+            }
+            app.state::<crate::window_controller::WindowController>()
+                .cancel_drag();
+            app.state::<crate::window_controller::WindowController>()
+                .stop_cursor_tracking();
             crate::window_controller::set_window_expanded_state(app, false)?;
             window.hide()?;
             Ok(())
