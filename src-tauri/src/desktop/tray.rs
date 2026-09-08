@@ -36,7 +36,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .tooltip("快捷图片画布")
+        .tooltip("PicBoard")
         .menu(&menu)
         .show_menu_on_left_click(false);
 

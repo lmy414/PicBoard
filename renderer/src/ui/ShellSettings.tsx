@@ -170,7 +170,7 @@ export function ShellSettings() {
         <span className="qib-switch" aria-hidden="true" />
         <span className="qib-toggle-copy">
           <b>开机自启动</b>
-          <small>{settings.autoStartAvailable ? "登录 Windows 后自动启动快捷图片画布。" : "仅发布版可用；开发模式不会注册自启动。"}</small>
+          <small>{settings.autoStartAvailable ? "登录 Windows 后自动启动 PicBoard。" : "仅发布版可用；开发模式不会注册自启动。"}</small>
         </span>
       </label>
       <p className="qib-shell-note">关闭行为与自启动是独立的桌面偏好，不会移动或改变任何图片数据。</p>

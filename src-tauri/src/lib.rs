@@ -1,4 +1,4 @@
-//! Tauri 2 host for quick-image-board.
+//! Tauri 2 host for PicBoard.
 //!
 //! Startup sequence (mirrors Electron `app.whenReady`):
 //! 1. Resolve an explicit isolated data root (`--data-root`, env var, or legacy
@@ -155,7 +155,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let page_controller = window_controller.clone();
     let page_state = readiness.clone();
     let window = WebviewWindowBuilder::new(app, "main", url)
-        .title("快捷图片画布")
+        .title("PicBoard")
         .inner_size(88.0, 88.0)
         .resizable(false)
         .decorations(false)
@@ -238,5 +238,5 @@ pub fn run() {
         ]);
     builder
         .run(tauri::generate_context!())
-        .expect("failed to run quick-image-board");
+        .expect("failed to run PicBoard");
 }

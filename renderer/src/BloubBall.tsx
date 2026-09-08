@@ -291,7 +291,7 @@ export function BloubBall({
       : state === "over" ? "把图片放到嘴边"
         : state === "success" ? `已接收 ${intakeCount} 张图片`
           : state === "error" ? "图片接收失败"
-            : "快捷图片画布";
+            : "PicBoard 悬浮图片画板";
 
   return (
     <svg

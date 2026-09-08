@@ -1,8 +1,17 @@
 {
-  "name": "quick-image-board",
-  "version": "0.1.0",
+  "name": "picboard",
+  "version": "0.1.1",
   "private": true,
-  "description": "本地优先的桌面图片临时画布与分类工具",
+  "description": "Windows 悬浮图片收集与本地画板",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lmy414/PicBoard.git"
+  },
+  "homepage": "https://github.com/lmy414/PicBoard#readme",
+  "bugs": {
+    "url": "https://github.com/lmy414/PicBoard/issues"
+  },
   "scripts": {
     "dev": "node scripts/dev-rust.mjs",
     "dev:renderer": "vite --host 127.0.0.1",

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  quick_image_board_lib::run();
+  picboard_lib::run();
 }

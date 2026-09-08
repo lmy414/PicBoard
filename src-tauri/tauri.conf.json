@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "quick-image-board",
-  "version": "0.1.0",
+  "productName": "PicBoard",
+  "version": "0.1.1",
   "identifier": "com.quickimageboard.app",
   "build": {
     "frontendDist": "../dist",
