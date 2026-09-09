@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import type { AppState, CanvasViewport, ImageBoardApi, ImageRecord, ImportViewport } from "../../shared/image-board";
 import { BloubBall } from "./BloubBall";
 import { DEFAULT_BALL_SETTINGS, readBallSettings, saveBallSettings, type BallSettings } from "./ball-settings";
 import { COLORS, SHAPES } from "./third-party/bloub/skins";
 import { createMiniMapGeometry, miniMapToWorld } from "../../shared/minimap-geometry";
+import { applySelection, imagesInSelectionRect, mergeSelection, normalizeSelectionRect, type SelectionRect } from "../../shared/canvas-selection";
+import { clampPreviewOffset, clampPreviewZoom, fitPreviewSize, zoomAroundPoint } from "../../shared/preview-geometry";
 import { ToastView, toastChannel, type ToastKind, type ToastMessage } from "./ui/Toast";
 import { IconClose, IconDots, IconGear, IconMinus } from "./ui/Icons";
 // Controls lane exports (fixed contract §通用控件; landed by the controls lane).
@@ -14,7 +16,7 @@ import { Select } from "./ui/Select";
 import { ShellSettings } from "./ui/ShellSettings";
 
 type ViewMode = "canvas" | "library" | "settings";
-type DialogState = { kind: "prompt"; title: string; value: string; resolve: (value: string | null) => void } | { kind: "confirm"; title: string; message: string; resolve: (value: boolean) => void };
+type DialogState = ({ kind: "prompt"; title: string; value: string; resolve: (value: string | null) => void } | { kind: "confirm"; title: string; message: string; resolve: (value: boolean) => void }) & { anchor?: PanelAnchor | null };
 type PathSettings = { filePath: string; classifiedPath: string; temporaryPath: string };
 type PanelAnchor = { left: number; top: number };
 /** Ball intake feedback states (contract §球). */
@@ -66,6 +68,10 @@ function isEditableTarget(target: EventTarget | null) {
   return Boolean(element?.isContentEditable || element?.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
 }
 
+function hasBlockingDialog() {
+  return Boolean(document.querySelector('.dialog-card[role="alertdialog"][aria-modal="true"]'));
+}
+
 /**
  * Temporary seam (contract: cross-lane types may be missing until merge).
  * The ball lane is about to add `intakeState/intakeKey/intakeCount/variant` to
@@ -105,12 +111,15 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   const [ballSettings, setBallSettings] = useState<BallSettings>(() => readBallSettings(window.localStorage));
   const [pathSettings, setPathSettings] = useState<PathSettings>(() => readPathSettings());
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const previewIdRef = useRef<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectionAnchor, setSelectionAnchor] = useState<PanelAnchor | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const dragDepthRef = useRef(0);
   const [busy, setBusy] = useState(false);
+  const copyBusyRef = useRef(false);
+  const deleteBusyRef = useRef(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastChannelRef = useRef<ReturnType<typeof toastChannel> | null>(null);
@@ -118,7 +127,10 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   const [failureLabel, setFailureLabel] = useState("");
   const [zoom, setZoom] = useState(DEFAULT_VIEWPORT.zoom);
   const [worldOffset, setWorldOffset] = useState({ x: DEFAULT_VIEWPORT.x, y: DEFAULT_VIEWPORT.y });
+  const worldOffsetRef = useRef(worldOffset);
+  worldOffsetRef.current = worldOffset;
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [quickActionsSource, setQuickActionsSource] = useState<HTMLElement | null>(null);
   const [intake, setIntake] = useState<{ state: IntakeState; key: number }>({ state: "idle", key: 0 });
   const [intakeCount, setIntakeCount] = useState(0);
   const intakeKeyRef = useRef(0);
@@ -127,12 +139,18 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   const importSeqRef = useRef(0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const appShellRef = useRef<HTMLElement>(null);
-  const panRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const panRef = useRef<{ x: number; y: number; ox: number; oy: number; pointerId: number } | null>(null);
+  const selectionRef = useRef<{ start: { x: number; y: number }; additive: boolean; pointerId: number } | null>(null);
+  const selectionRectRef = useRef<SelectionRect | null>(null);
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+  const spacePressedRef = useRef(false);
+  const [spacePressed, setSpacePressed] = useState(false);
 
   const activeCanvas = state?.canvases.find((canvas) => canvas.id === state.activeCanvasId);
   const canvasImages = state && activeCanvas ? imageList(state, activeCanvas.id) : [];
   const previewImage = previewId && state?.images[previewId];
   const panelVisible = phase === "expanded" || phase === "closing";
+  const dialogOpen = dialog !== null;
 
   // ---- single feedback outlet -------------------------------------------------
   const showToast = useCallback((kind: ToastKind, message: string) => {
@@ -197,9 +215,11 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
 
   const clearInteraction = useCallback(() => {
     setSelectedIds([]);
+    previewIdRef.current = null;
     setPreviewId(null);
     setHoveredId(null);
     setSelectionAnchor(null);
+    setQuickActionsSource(null);
   }, []);
 
   const clearDialog = useCallback(() => setDialog(null), []);
@@ -416,9 +436,10 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   }, [applyState, busy, currentCanvasIds, state, viewMode]);
 
   const copyFiles = useCallback(async (ids: string[]) => {
-    if (!state || ids.length === 0 || busy) return;
+    if (!state || ids.length === 0 || busy || copyBusyRef.current) return;
     const targetIds = ids.filter((id) => Boolean(state.images[id]));
     if (targetIds.length === 0) return;
+    copyBusyRef.current = true;
     markBusy("正在复制图片文件…");
     try {
       const result = await window.imageBoard.copyImageFiles(targetIds);
@@ -426,7 +447,10 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
       else if (result.copied > 0) showNotice("已复制图片文件");
       else showInfo("没有复制图片文件");
     } catch (caught) { showError(caught instanceof Error ? caught.message : "复制失败"); }
-    finally { markIdle(); }
+    finally {
+      copyBusyRef.current = false;
+      markIdle();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, state]);
 
@@ -434,20 +458,14 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
     if (!state) return [];
     if (viewMode === "canvas") {
       if (previewId && currentCanvasIds.has(previewId)) return [previewId];
-      const selected = selectedIds.filter((id) => currentCanvasIds.has(id));
-      if (selected.length > 1) return selected;
-      if (hoveredId && currentCanvasIds.has(hoveredId)) return [hoveredId];
-      if (selected.length === 1) return selected;
-      return [];
+      return selectedIds.filter((id) => currentCanvasIds.has(id));
     }
     if (viewMode === "library") {
       if (previewId && libraryImageIds.has(previewId)) return [previewId];
-      const selected = selectedIds.filter((id) => libraryImageIds.has(id));
-      if (selected.length > 0) return selected;
-      return hoveredId && libraryImageIds.has(hoveredId) ? [hoveredId] : [];
+      return selectedIds.filter((id) => libraryImageIds.has(id));
     }
     return [];
-  }, [currentCanvasIds, hoveredId, libraryImageIds, previewId, selectedIds, state, viewMode]);
+  }, [currentCanvasIds, libraryImageIds, previewId, selectedIds, state, viewMode]);
 
   const deleteTargetIds = useCallback((key: "Delete" | "Backspace") => {
     if (viewMode !== "canvas") return [];
@@ -459,7 +477,11 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (!panelVisible || dialog || isEditableTarget(target) || target?.closest("input, textarea, [contenteditable=true], .dialog-card")) return;
+      if (dialogOpen) return;
+      if (!panelVisible || isEditableTarget(target) || target?.closest("input, textarea, select, [contenteditable=true], .dialog-card")) return;
+      // The preview modal owns Escape; other global shortcuts (for example
+      // copying or removing the current preview) remain available.
+      if (previewId && event.key === "Escape") return;
       if (event.key === "Escape") {
         if (previewId || selectedIds.length > 0 || hoveredId) {
           event.preventDefault();
@@ -484,7 +506,7 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearInteraction, copyFiles, copyTargetIds, deleteTargetIds, dialog, hoveredId, panelVisible, previewId, removeFromCanvas, selectedIds.length, viewMode]);
+  }, [clearInteraction, copyFiles, copyTargetIds, deleteTargetIds, dialogOpen, hoveredId, panelVisible, previewId, removeFromCanvas, selectedIds.length, viewMode]);
 
   const isFileDrag = (event: React.DragEvent) => Array.from(event.dataTransfer.items).some((item) => item.kind === "file") || event.dataTransfer.files.length > 0 || Array.from(event.dataTransfer.types).includes("Files");
   const handleDragEnter = (event: React.DragEvent) => {
@@ -556,34 +578,42 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
     const rightFits = card.right - shell.left + gap + width <= shell.width - 12;
     const leftFits = card.left - shell.left - gap - width >= 12;
     let left = rightFits ? card.right - shell.left + gap : leftFits ? card.left - shell.left - gap - width : Math.max(12, (shell.width - width) / 2);
-    const estimatedHeight = 190;
+    const estimatedHeight = 230;
     let top = card.top - shell.top;
-    if (!rightFits && !leftFits) top = card.bottom - shell.top + gap + estimatedHeight <= shell.height - 12 ? card.bottom - shell.top + gap : card.top - shell.top - estimatedHeight - gap;
+    if (!rightFits && !leftFits) top = card.bottom - shell.top + gap;
     return { left: Math.round(Math.max(12, Math.min(left, shell.width - width - 12))), top: Math.round(Math.max(12, Math.min(top, shell.height - estimatedHeight - 12))) };
   };
 
-  const selectImage = (event: React.MouseEvent<HTMLElement> | null, imageId: string) => {
+  const selectImage = (event: React.MouseEvent<HTMLElement> | null, imageId: string, toggleSelection = Boolean(event?.shiftKey)) => {
     event?.stopPropagation();
-    const anchor = event ? panelAnchorFor(event.currentTarget) : null;
-    if (event?.shiftKey) {
-      setSelectedIds((current) => {
-        const next = current.includes(imageId) ? current.filter((id) => id !== imageId) : [...current, imageId];
-        if (next.length === 0) setSelectionAnchor(null);
-        else setSelectionAnchor(anchor);
-        setPreviewId(null);
-        return next;
-      });
-      return;
-    }
-    setSelectedIds([imageId]);
-    setSelectionAnchor(anchor);
-    setPreviewId(null);
+    const source = event?.currentTarget ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const anchor = source ? panelAnchorFor(source) : null;
+    setQuickActionsSource(source);
+    setSelectedIds((current) => {
+      const next = applySelection(current, imageId, toggleSelection);
+      if (next.length === 0) setSelectionAnchor(null); else setSelectionAnchor(anchor);
+      previewIdRef.current = null;
+      setPreviewId(null);
+      return next;
+    });
   };
 
   const openPreview = (imageId: string) => {
+    previewIdRef.current = imageId;
     setPreviewId(imageId);
     setSelectedIds([]);
     setSelectionAnchor(null);
+  };
+
+  const openQuickActions = (event: React.MouseEvent<HTMLElement> | null, imageId: string) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const source = event?.currentTarget ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setQuickActionsSource(source);
+    if (!selectedIds.includes(imageId)) setSelectedIds([imageId]);
+    previewIdRef.current = null;
+    setPreviewId(null);
+    setSelectionAnchor(source ? panelAnchorFor(source) : null);
   };
 
   const persistViewport = async (nextOffset: { x: number; y: number }, nextZoom: number) => {
@@ -626,26 +656,107 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
+  const canvasPoint = (event: React.PointerEvent) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    return rect ? { x: (event.clientX - rect.left - worldOffset.x) / zoom, y: (event.clientY - rect.top - worldOffset.y) / zoom } : { x: 0, y: 0 };
+  };
   const startPan = (event: React.PointerEvent) => {
     const target = event.target as HTMLElement;
-    if ((event.button !== 0 && event.button !== 1) || target.closest(".image-card, .quick-actions, .mini-map") || target.closest("button")) return;
+    if (target.closest(".quick-actions, .mini-map") || target.closest("button")) return;
+    const imageTarget = target.closest<HTMLElement>(".image-card");
+    const shouldPan = event.button === 1 || (event.button === 0 && spacePressedRef.current);
+    // Normal left clicks on a card belong to the card. Capture is used so the
+    // pan gesture can still begin on a card without stealing its click gesture.
+    if (imageTarget && !shouldPan) return;
+    if (shouldPan) {
+      event.preventDefault();
+      event.stopPropagation();
+      panRef.current = { x: event.clientX, y: event.clientY, ox: worldOffset.x, oy: worldOffset.y, pointerId: event.pointerId };
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      return;
+    }
+    if (event.button !== 0) return;
     event.preventDefault();
-    panRef.current = { x: event.clientX, y: event.clientY, ox: worldOffset.x, oy: worldOffset.y };
+    event.stopPropagation();
+    const point = canvasPoint(event);
+    selectionRef.current = { start: point, additive: event.shiftKey, pointerId: event.pointerId };
+    selectionRectRef.current = { x: point.x, y: point.y, width: 0, height: 0 };
+    setSelectionRect(selectionRectRef.current);
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   };
-  const movePan = (event: React.PointerEvent) => { if (panRef.current) setWorldOffset({ x: panRef.current.ox + event.clientX - panRef.current.x, y: panRef.current.oy + event.clientY - panRef.current.y }); };
-  const stopPan = (event?: React.PointerEvent) => {
-    if (!panRef.current) return;
-    if (event && viewportRef.current?.hasPointerCapture(event.pointerId)) viewportRef.current.releasePointerCapture(event.pointerId);
-    const next = worldOffset; panRef.current = null;
-    if (state?.activeCanvasId) void persistViewport(next, zoom);
+  const movePan = (event: React.PointerEvent) => {
+    if (panRef.current?.pointerId === event.pointerId) {
+      setWorldOffset({ x: panRef.current.ox + event.clientX - panRef.current.x, y: panRef.current.oy + event.clientY - panRef.current.y });
+      return;
+    }
+    if (selectionRef.current?.pointerId === event.pointerId) {
+      const nextRect = normalizeSelectionRect(selectionRef.current.start, canvasPoint(event));
+      selectionRectRef.current = nextRect;
+      setSelectionRect(nextRect);
+    }
   };
+  const stopPan = (event?: React.PointerEvent) => {
+    if (panRef.current && (!event || panRef.current.pointerId === event.pointerId)) {
+      const next = worldOffsetRef.current; panRef.current = null;
+      if (event && viewportRef.current?.hasPointerCapture(event.pointerId)) viewportRef.current.releasePointerCapture(event.pointerId);
+      if (state?.activeCanvasId) void persistViewport(next, zoom);
+      return;
+    }
+    if (selectionRef.current && (!event || selectionRef.current.pointerId === event.pointerId)) {
+      const selection = selectionRef.current;
+      const rect = selectionRectRef.current;
+      selectionRef.current = null;
+      selectionRectRef.current = null;
+      setSelectionRect(null);
+      if (event && viewportRef.current?.hasPointerCapture(event.pointerId)) viewportRef.current.releasePointerCapture(event.pointerId);
+      if (rect && (rect.width > 3 || rect.height > 3)) {
+        const nextIds = imagesInSelectionRect(canvasImages, rect);
+        setSelectedIds((current) => mergeSelection(current, nextIds, selection.additive));
+        previewIdRef.current = null;
+        setPreviewId(null);
+      } else if (!selection.additive) {
+        setSelectedIds([]); setSelectionAnchor(null); previewIdRef.current = null; setPreviewId(null);
+      }
+    }
+  };
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => { if (event.code === "Space" && !isEditableTarget(event.target)) { spacePressedRef.current = true; setSpacePressed(true); } };
+    const up = (event: KeyboardEvent) => { if (event.code === "Space") { spacePressedRef.current = false; setSpacePressed(false); } };
+    window.addEventListener("keydown", down); window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, []);
 
-  const openPrompt = (title: string, value = "") => new Promise<string | null>((resolve) => setDialog({ kind: "prompt", title, value, resolve }));
+  const openPrompt = (title: string, value = "") => {
+    const origin = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>(".quick-actions, .preview-card") : null;
+    const anchor = origin ? panelAnchorFor(origin) : null;
+    return new Promise<string | null>((resolve) => setDialog({ kind: "prompt", title, value, resolve, anchor }));
+  };
   const openConfirm = (title: string, message: string) => new Promise<boolean>((resolve) => setDialog({ kind: "confirm", title, message, resolve }));
+  const renameImage = async (image: ImageRecord) => {
+    const name = await openPrompt("重命名图片", image.fileName);
+    if (name === null || !name.trim()) return;
+    markBusy("正在重命名…");
+    try { applyState(await window.imageBoard.renameImage(image.id, name.trim())); showNotice("图片已重命名"); }
+    catch (caught) { showError(caught instanceof Error ? caught.message : "重命名失败"); }
+    finally { markIdle(); }
+  };
+  const deleteClassifiedImages = async (ids: string[]) => {
+    if (!state || ids.length === 0 || deleteBusyRef.current || ids.some((id) => state.images[id]?.status !== "classified")) return;
+    deleteBusyRef.current = true;
+    try {
+      const confirmed = await openConfirm("删除分类图片？", `将把 ${ids.length} 张已分类图片及其库文件发送到 Windows 系统回收站，可在系统回收站恢复；恢复文件不会自动恢复 PicBoard 索引。`);
+      if (!confirmed) return;
+      markBusy("正在删除分类图片…");
+      try { applyState(await window.imageBoard.deleteClassifiedImages(ids)); clearInteraction(); showNotice(`已删除 ${ids.length} 张分类图片`); }
+      catch (caught) { showError(caught instanceof Error ? caught.message : "删除分类图片失败"); }
+      finally { markIdle(); }
+    } finally {
+      deleteBusyRef.current = false;
+    }
+  };
   const changeCanvas = async (canvasId: string) => { if (canvasId === state?.activeCanvasId || busy) return; clearInteraction(); markBusy(); try { applyState(await window.imageBoard.setActiveCanvas(canvasId)); } catch (caught) { showError(caught instanceof Error ? caught.message : "切换画布失败"); } finally { markIdle(); } };
   const rename = async () => { if (!activeCanvas) return; const name = await openPrompt("重命名画布", activeCanvas.name); if (name !== null) void update(() => window.imageBoard.renameCanvas(activeCanvas.id, name)); };
-  const removeCanvas = async () => { if (!activeCanvas) return; const confirmed = await openConfirm(`删除“${activeCanvas.name}”？`, "未分类图片会删除，已分类图片及其库文件会保留。此操作不可在应用内撤销。"); if (confirmed) { clearInteraction(); void update(() => window.imageBoard.deleteCanvas(activeCanvas.id)); } };
+  const removeCanvas = async () => { if (!activeCanvas) return; const confirmed = await openConfirm(`删除“${activeCanvas.name}”？`, "未分类图片及其临时文件会被删除，此操作不可撤销。已分类图片及其库文件会保留。"); if (confirmed) { clearInteraction(); void update(() => window.imageBoard.deleteCanvas(activeCanvas.id)); } };
   const switchView = (next: ViewMode) => { setViewMode(next); clearInteraction(); setShowControls(false); };
 
   if (!state) return <div className="loading-card">{loadError ? <><strong>本地图片画布打开失败</strong><span>{loadError}</span><div className="loading-actions"><button className="primary-button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>重试</button><button onClick={() => void window.imageBoard.closeWindow()}>退出</button></div></> : "正在打开本地图片画布…"}</div>;
@@ -657,13 +768,13 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   return <main ref={appShellRef} className={`app-shell ${phase === "closing" ? "closing" : ""} ${dropActive ? "drop-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
     <header className="topbar"><div className="window-drag-region"><div className="brand-mark"><IntakeBall settings={ballSettings} variant="brand" /></div><div className="brand-copy"><strong>PicBoard</strong><span>{viewMode === "settings" ? "外观、路径与窗口行为" : "本地临时整理区"}</span></div></div><div className="topbar-actions"><button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button><button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button><button className={`icon-button no-drag settings-button ${viewMode === "settings" ? "active" : ""}`} aria-label="打开设置" title="打开设置" onClick={() => switchView("settings")}><IconGear size={15} /></button>{viewMode === "canvas" && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}<button className="icon-button no-drag" aria-label="收起画板" title="收起画板" onClick={() => requestExpand(false)}><IconMinus size={15} /></button><button className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button></div>{busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}</header>
     {viewMode === "canvas" ? <>
-      {showControls && <div className="canvas-controls"><div className="canvas-tabs">{state.canvases.map((canvas) => <button key={canvas.id} className={canvas.id === state.activeCanvasId ? "canvas-tab active" : "canvas-tab"} onClick={() => void changeCanvas(canvas.id)}>{canvas.name}<small>{canvas.imageIds.length}</small></button>)}<button className="add-canvas" onClick={() => { clearInteraction(); void update(() => window.imageBoard.createCanvas()); }}>＋ 新画布</button></div><div className="canvas-toolbar"><span className="toolbar-label">{activeCanvas?.name ?? "当前画布"}</span><span className="toolbar-hint">拖入图片 · 拖动定位 · 双击预览 · Shift 多选</span><div className="zoom-controls"><button title="缩小" aria-label="缩小" onClick={() => zoomBy(-0.1)}>−</button><span>{Math.round(zoom * 100)}%</span><button title="放大" aria-label="放大" onClick={() => zoomBy(0.1)}>＋</button><button className="locate-button" title="Ctrl+双击空白处定位全部" onClick={locateAll}>定位全部</button></div></div></div>}
-      <div ref={viewportRef} className={`canvas-viewport ${dropActive ? "drop-active" : ""}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} onLostPointerCapture={stopPan}><div className="canvas-world" style={{ transform: `translate(${worldOffset.x}px, ${worldOffset.y}px) scale(${zoom})` }}>{canvasImages.map((image) => <CanvasImage key={image.id} image={image} zoom={zoom} selected={selectedIds.includes(image.id)} onSelect={selectImage} onPreview={openPreview} onHover={setHoveredId} onMove={(id, x, y) => void update(() => window.imageBoard.moveImage(id, x, y))} />)}</div>{canvasImages.length === 0 && <div className="empty-canvas"><div className="empty-icon">↘</div><strong>把图片拖到悬浮窗</strong><span>或点击后使用 Ctrl+V 粘贴到当前画布</span></div>}{canvasImages.length > 0 && <MiniMap images={canvasImages} viewportRef={viewportRef} worldOffset={worldOffset} zoom={zoom} onPreview={previewViewport} onCommit={commitViewport} />}</div>
+      {showControls && <div className="canvas-controls"><div className="canvas-tabs">{state.canvases.map((canvas) => <button key={canvas.id} className={canvas.id === state.activeCanvasId ? "canvas-tab active" : "canvas-tab"} onClick={() => void changeCanvas(canvas.id)}>{canvas.name}<small>{canvas.imageIds.length}</small></button>)}<button className="add-canvas" onClick={() => { clearInteraction(); void update(() => window.imageBoard.createCanvas()); }}>＋ 新画布</button></div><div className="canvas-toolbar"><span className="toolbar-label">{activeCanvas?.name ?? "当前画布"}</span><span className="toolbar-hint">左键预览 · Shift 多选 · 右键快捷操作 · 空白拖框选 · 中键/Space 平移</span><div className="zoom-controls"><button title="缩小" aria-label="缩小" onClick={() => zoomBy(-0.1)}>−</button><span>{Math.round(zoom * 100)}%</span><button title="放大" aria-label="放大" onClick={() => zoomBy(0.1)}>＋</button><button className="locate-button" title="定位全部图片" onClick={locateAll}>定位全部</button></div></div></div>}
+      <div ref={viewportRef} className={`canvas-viewport ${dropActive ? "drop-active" : ""} ${spacePressed ? "hand-tool" : ""}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} onLostPointerCapture={stopPan} onContextMenu={(event) => event.preventDefault()}><div className="canvas-world" style={{ transform: `translate(${worldOffset.x}px, ${worldOffset.y}px) scale(${zoom})` }}>{canvasImages.map((image) => <CanvasImage key={image.id} image={image} zoom={zoom} selected={selectedIds.includes(image.id)} selectedIds={selectedIds} onSelect={selectImage} onPreview={openPreview} onQuickActions={openQuickActions} spacePressed={spacePressed} onHover={setHoveredId} onMove={(id, x, y) => void update(() => window.imageBoard.moveImage(id, x, y))} />)}</div>{selectionRect && <div className="selection-rect" style={{ left: `${selectionRect.x * zoom + worldOffset.x}px`, top: `${selectionRect.y * zoom + worldOffset.y}px`, width: `${selectionRect.width * zoom}px`, height: `${selectionRect.height * zoom}px` }} />}{canvasImages.length === 0 && <div className="empty-canvas"><div className="empty-icon">↘</div><strong>把图片拖到悬浮窗</strong><span>或点击后使用 Ctrl+V 粘贴到当前画布</span></div>}{canvasImages.length > 0 && <MiniMap images={canvasImages} viewportRef={viewportRef} worldOffset={worldOffset} zoom={zoom} onPreview={previewViewport} onCommit={commitViewport} />}</div>
       {showControls && activeCanvas && <div className="footer-actions"><button onClick={() => void rename()}>重命名画布</button><button className="danger-link" onClick={() => void removeCanvas()}>删除画布</button></div>}
-    </> : viewMode === "library" ? <Library state={state} onPreview={openPreview} onSelect={selectImage} onCopy={(ids) => void copyFiles(ids)} /> : <SettingsPage state={state} ballSettings={ballSettings} pathSettings={pathSettings} onBallSettingsChange={(patch) => setBallSettings((current) => ({ ...current, ...patch }))} onPathSettingsChange={(patch) => setPathSettings((current) => ({ ...current, ...patch }))} onResetBall={() => setBallSettings({ ...DEFAULT_BALL_SETTINGS })} onAddCategory={async () => { const name = await openPrompt("新建分类"); if (!name) return false; return update(() => window.imageBoard.createCategory(name)); }} />}
-    {selectedIds.length > 0 && viewMode === "canvas" && <QuickActions state={state} selectedIds={selectedIds} anchor={selectionAnchor} showRemove={true} onClose={clearInteraction} onUpdate={applyState} onError={showError} onNotice={showNotice} onPrompt={openPrompt} />}
-    {selectedIds.length > 0 && viewMode === "library" && <QuickActions state={state} selectedIds={selectedIds} anchor={selectionAnchor} showRemove={false} onClose={clearInteraction} onUpdate={applyState} onError={showError} onNotice={showNotice} onPrompt={openPrompt} />}
-    {previewImage && <QuickPreview image={previewImage} onClose={() => { setPreviewId(null); setHoveredId(null); }} onClassify={() => { setSelectedIds([previewImage.id]); setSelectionAnchor(null); setPreviewId(null); }} onCopy={() => void copyFiles([previewImage.id])} />}
+    </> : viewMode === "library" ? <Library state={state} selectedIds={selectedIds} onPreview={openPreview} onSelect={selectImage} onQuickActions={openQuickActions} onCopy={(ids) => void copyFiles(ids)} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} /> : <SettingsPage state={state} ballSettings={ballSettings} pathSettings={pathSettings} onBallSettingsChange={(patch) => setBallSettings((current) => ({ ...current, ...patch }))} onPathSettingsChange={(patch) => setPathSettings((current) => ({ ...current, ...patch }))} onResetBall={() => setBallSettings({ ...DEFAULT_BALL_SETTINGS })} onAddCategory={async () => { const name = await openPrompt("新建分类"); if (!name) return false; return update(() => window.imageBoard.createCategory(name)); }} />}
+    {selectedIds.length > 0 && viewMode === "canvas" && <QuickActions state={state} selectedIds={selectedIds} source={quickActionsSource} anchor={selectionAnchor} showRemove={true} onClose={clearInteraction} onUpdate={applyState} onError={showError} onNotice={showNotice} onCopy={copyFiles} onPrompt={openPrompt} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
+    {selectedIds.length > 0 && viewMode === "library" && <QuickActions state={state} selectedIds={selectedIds} source={quickActionsSource} anchor={selectionAnchor} showRemove={false} onClose={clearInteraction} onUpdate={applyState} onError={showError} onNotice={showNotice} onCopy={copyFiles} onPrompt={openPrompt} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
+    {previewImage && <QuickPreview image={previewImage} onClose={() => { previewIdRef.current = null; setPreviewId(null); setHoveredId(null); }} onClassify={(origin) => { setSelectedIds([previewImage.id]); setQuickActionsSource(null); setSelectionAnchor(panelAnchorFor(origin)); previewIdRef.current = null; setPreviewId(null); }} onCopy={() => void copyFiles([previewImage.id])} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
     <ToastView toast={toast} onClose={clearToast} />
     {dialog && <Dialog dialog={dialog} onClose={clearDialog} />}
   </main>;
@@ -680,6 +791,12 @@ function CollapsedBall({ settings, count, intakeState, intakeKey, intakeCount, d
 
   useEffect(() => { onOpenRef.current = onOpen; }, [onOpen]);
   const clearTimer = useCallback(() => { if (timerRef.current) clearTimeout(timerRef.current); timerRef.current = null; }, []);
+  const dragCommandRef = useRef<Promise<void>>(Promise.resolve());
+  const queueDragCommand = useCallback((command: () => Promise<void>) => {
+    const next = dragCommandRef.current.catch(() => undefined).then(command);
+    dragCommandRef.current = next.catch(() => undefined);
+    return next;
+  }, []);
   const finish = useCallback((shouldOpen: boolean) => {
     clearTimer();
     const wasDragging = dragStartedRef.current;
@@ -688,10 +805,10 @@ function CollapsedBall({ settings, count, intakeState, intakeKey, intakeCount, d
     activePointerRef.current = null;
     dragStartedRef.current = false;
     setDragging(false);
-    if (wasDragging) void window.imageBoard.endWindowDrag();
+    if (wasDragging) void queueDragCommand(() => window.imageBoard.endWindowDrag());
     if (hadCapture && typeof pointerId === "number") shellRef.current?.releasePointerCapture(pointerId);
     if (shouldOpen && !wasDragging) onOpenRef.current();
-  }, [clearTimer]);
+  }, [clearTimer, queueDragCommand]);
   useEffect(() => {
     const cancelIfHidden = () => { if (document.visibilityState === "hidden") finish(false); };
     const cancelOnKey = (event: KeyboardEvent) => { if (event.key === "Escape") finish(false); };
@@ -715,13 +832,13 @@ function CollapsedBall({ settings, count, intakeState, intakeKey, intakeCount, d
       if (activePointerRef.current !== pointerId || document.visibilityState === "hidden") return;
       dragStartedRef.current = true;
       setDragging(true);
-      void window.imageBoard.startWindowDrag();
+      void queueDragCommand(() => window.imageBoard.startWindowDrag());
     }, 250);
   }, [clearTimer]);
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => { if (event.button === 0) beginHold(event.pointerId, event); };
-  const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => { if (activePointerRef.current === event.pointerId && !dragStartedRef.current && Math.hypot(event.clientX - holdPointRef.current.x, event.clientY - holdPointRef.current.y) >= 6) { clearTimer(); dragStartedRef.current = true; setDragging(true); void window.imageBoard.startWindowDrag(); } };
+  const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => { if (activePointerRef.current === event.pointerId && !dragStartedRef.current && Math.hypot(event.clientX - holdPointRef.current.x, event.clientY - holdPointRef.current.y) >= 6) { clearTimer(); dragStartedRef.current = true; setDragging(true); void queueDragCommand(() => window.imageBoard.startWindowDrag()); } };
   const mouseDown = (event: React.MouseEvent<HTMLDivElement>) => { if (event.button === 0 && activePointerRef.current === null) beginHold("mouse", event); };
-  const mouseMove = (event: React.MouseEvent<HTMLDivElement>) => { if (activePointerRef.current === "mouse" && !dragStartedRef.current && Math.hypot(event.clientX - holdPointRef.current.x, event.clientY - holdPointRef.current.y) >= 6) { clearTimer(); dragStartedRef.current = true; setDragging(true); void window.imageBoard.startWindowDrag(); } };
+  const mouseMove = (event: React.MouseEvent<HTMLDivElement>) => { if (activePointerRef.current === "mouse" && !dragStartedRef.current && Math.hypot(event.clientX - holdPointRef.current.x, event.clientY - holdPointRef.current.y) >= 6) { clearTimer(); dragStartedRef.current = true; setDragging(true); void queueDragCommand(() => window.imageBoard.startWindowDrag()); } };
   const pointerUp = (event: React.PointerEvent<HTMLDivElement>) => { if (activePointerRef.current === event.pointerId) finish(true); };
   const mouseUp = () => { if (activePointerRef.current === "mouse") finish(true); };
   const pointerCancel = (event: React.PointerEvent<HTMLDivElement>) => { if (activePointerRef.current === event.pointerId && !dragStartedRef.current) finish(false); };
@@ -795,7 +912,7 @@ function SettingsPage({ state, ballSettings, pathSettings, onBallSettingsChange,
   </section>;
 }
 
-function CanvasImage({ image, zoom, selected, onSelect, onPreview, onHover, onMove }: { image: ImageRecord; zoom: number; selected: boolean; onSelect: (event: React.MouseEvent<HTMLElement> | null, id: string) => void; onPreview: (id: string) => void; onHover: (id: string | null) => void; onMove: (id: string, x: number, y: number) => void }) {
+function CanvasImage({ image, zoom, selected, selectedIds, spacePressed, onSelect, onPreview, onQuickActions, onHover, onMove }: { image: ImageRecord; zoom: number; selected: boolean; selectedIds: string[]; spacePressed: boolean; onSelect: (event: React.MouseEvent<HTMLElement> | null, id: string, toggleSelection?: boolean) => void; onPreview: (id: string) => void; onQuickActions: (event: React.MouseEvent<HTMLElement> | null, id: string) => void; onHover: (id: string | null) => void; onMove: (id: string, x: number, y: number) => void }) {
   const nodeRef = useRef<HTMLElement>(null);
   const rafRef = useRef<number | null>(null);
   const activePointerRef = useRef<number | null>(null);
@@ -809,6 +926,8 @@ function CanvasImage({ image, zoom, selected, onSelect, onPreview, onHover, onMo
   const restoreTransform = () => { cancelFrame(); if (nodeRef.current) nodeRef.current.style.transform = ""; };
   useEffect(() => () => cancelFrame(), []);
   const pointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.button === 1) { event.preventDefault(); return; }
+    if (event.button === 1 || (event.button === 0 && spacePressed)) return;
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -862,29 +981,195 @@ function CanvasImage({ image, zoom, selected, onSelect, onPreview, onHover, onMo
   const pointerUp = (event: React.PointerEvent<HTMLElement>) => finish(event, true);
   const pointerCancel = (event: React.PointerEvent<HTMLElement>) => finish(event, false);
   const lostPointerCapture = (event: React.PointerEvent<HTMLElement>) => finish(event, false);
-  const click = (event: React.MouseEvent<HTMLElement>) => { if (suppressClickRef.current) { suppressClickRef.current = false; event.preventDefault(); return; } onSelect(event, image.id); };
-  const doubleClick = (event: React.MouseEvent<HTMLElement>) => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } event.stopPropagation(); onPreview(image.id); };
+  const contextMenu = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    onQuickActions(event, image.id);
+  };
+  const keyboard = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) { event.preventDefault(); onQuickActions(null, image.id); return; }
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (event.shiftKey) onSelect(null, image.id, true); else onPreview(image.id); }
+  };
+  const click = (event: React.MouseEvent<HTMLElement>) => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; event.preventDefault(); return; }
+    event.currentTarget.focus();
+    if (event.shiftKey) onSelect(event, image.id, true); else onPreview(image.id);
+  };
 
-  return <article ref={nodeRef} className={`image-card ${selected ? "selected" : ""} ${pressed ? "pressed" : ""} ${dragging ? "dragging" : ""}`} style={{ left: image.x, top: image.y }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} onLostPointerCapture={lostPointerCapture} onMouseEnter={() => onHover(image.id)} onMouseLeave={() => onHover(null)} onClick={click} onDoubleClick={doubleClick}>{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} draggable={false} /> : <div className="image-missing">预览不可用</div>}<div className="image-meta"><span className={image.status === "classified" ? "status-dot classified" : "status-dot"}></span><span title={image.fileName}>{image.fileName}</span></div></article>;
+  return <article ref={nodeRef} role="button" tabIndex={0} aria-label={`图片 ${image.fileName}`} className={`image-card ${selected ? "selected" : ""} ${pressed ? "pressed" : ""} ${dragging ? "dragging" : ""}`} style={{ left: image.x, top: image.y }} onKeyDown={keyboard} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} onLostPointerCapture={lostPointerCapture} onMouseEnter={() => onHover(image.id)} onMouseLeave={() => onHover(null)} onClick={click} onContextMenu={contextMenu}>{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} draggable={false} /> : <div className="image-missing">预览不可用</div>}<div className="image-meta"><span className={image.status === "classified" ? "status-dot classified" : "status-dot"}></span><span title={image.fileName}>{image.fileName}</span></div></article>;
 }
 
-function QuickPreview({ image, onClose, onClassify, onCopy }: { image: ImageRecord; onClose: () => void; onClassify: () => void; onCopy: () => void }) {
-  return <div className="preview-backdrop" onMouseDown={onClose}><section className="preview-card" role="dialog" aria-label="图片预览" onMouseDown={(event) => event.stopPropagation()}><div className="preview-header"><span>快速预览</span><button className="close-button" onClick={onClose} aria-label="关闭预览" title="关闭预览"><IconClose size={14} /></button></div><div className="preview-image-wrap">{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} /> : <div className="image-missing">预览不可用</div>}</div><div className="preview-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{image.status === "classified" ? "已归档图片" : "临时图片"}</span></div><div className="preview-actions"><button onClick={onClassify}>分类</button><button onClick={onCopy}>复制</button></div></section></div>;
+function QuickPreview({ image, onClose, onClassify, onCopy, onRename, onDelete }: { image: ImageRecord; onClose: () => void; onClassify: (origin: HTMLElement) => void; onCopy: () => void; onRename: (image: ImageRecord) => void; onDelete: (ids: string[]) => void }) {
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
+  const [baseSize, setBaseSize] = useState({ width: 1, height: 1 });
+  const naturalSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocusedRef = useRef<Element | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const dragRef = useRef<{ x: number; y: number; ox: number; oy: number; pointerId: number } | null>(null);
+  const clamp = (nextOffset: { x: number; y: number }, nextZoom = zoom, size = baseSize) => {
+    const wrap = wrapRef.current;
+    if (!wrap) return nextOffset;
+    return clampPreviewOffset(nextOffset, { width: wrap.clientWidth, height: wrap.clientHeight }, size, nextZoom);
+  };
+  useLayoutEffect(() => {
+    previouslyFocusedRef.current = document.activeElement;
+    closeRef.current?.focus();
+    const card = cardRef.current;
+    const focusable = () => Array.from(card?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []).filter((element) => !element.hasAttribute("disabled"));
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (hasBlockingDialog()) return;
+        event.preventDefault(); event.stopPropagation(); onCloseRef.current(); return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      if (elements.length === 0) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", keydown, true);
+    return () => {
+      document.removeEventListener("keydown", keydown, true);
+      const target = previouslyFocusedRef.current;
+      if (target instanceof HTMLElement && target.isConnected) target.focus();
+    };
+  }, []);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const resize = () => {
+      const natural = naturalSizeRef.current;
+      const nextBaseSize = natural
+        ? fitPreviewSize(natural, { width: wrap.clientWidth, height: wrap.clientHeight })
+        : baseSize;
+      if (natural) setBaseSize(nextBaseSize);
+      setOffset((current) => clamp(current, zoom, nextBaseSize));
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [baseSize, zoom]);
+  useEffect(() => {
+    setZoom(1); setOffset({ x: 0, y: 0 }); setBaseSize({ width: 1, height: 1 }); naturalSizeRef.current = null;
+  }, [image.id]);
+  const onWheel = (event: React.WheelEvent) => {
+    event.preventDefault();
+    const nextZoom = clampPreviewZoom(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
+    if (nextZoom === zoom) return;
+    const wrap = wrapRef.current;
+    const rect = wrap?.getBoundingClientRect();
+    const point = rect ? { x: event.clientX - rect.left, y: event.clientY - rect.top } : { x: 0, y: 0 };
+    const viewport = wrap ? { width: wrap.clientWidth, height: wrap.clientHeight } : { width: 0, height: 0 };
+    const nextOffset = zoomAroundPoint(point, zoom, nextZoom, offsetRef.current, viewport);
+    setOffset(clamp(nextOffset, nextZoom)); setZoom(nextZoom);
+  };
+  const pointerDown = (event: React.PointerEvent) => {
+    if (event.button !== 0 || zoom <= 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = { x: event.clientX, y: event.clientY, ox: offsetRef.current.x, oy: offsetRef.current.y, pointerId: event.pointerId };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const pointerMove = (event: React.PointerEvent) => {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
+    setOffset(clamp({ x: dragRef.current.ox + event.clientX - dragRef.current.x, y: dragRef.current.oy + event.clientY - dragRef.current.y }));
+  };
+  const pointerUp = (event: React.PointerEvent) => {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  const lostPointerCapture = (event: React.PointerEvent) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  };
+  useEffect(() => () => { dragRef.current = null; }, []);
+  return <div className="preview-backdrop" onMouseDown={onClose}><section ref={cardRef} className="preview-card" role="dialog" aria-modal="true" aria-label="图片预览" onMouseDown={(event) => event.stopPropagation()}><div className="preview-header"><span>快速预览</span><span className="preview-zoom">{Math.round(zoom * 100)}%</span><button ref={closeRef} className="close-button" onClick={onClose} aria-label="关闭预览" title="关闭预览"><IconClose size={14} /></button></div><div ref={wrapRef} className={`preview-image-wrap ${zoom > 1 ? "zoomed" : ""}`} onWheel={onWheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={lostPointerCapture}>{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} onLoad={(event) => { const natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; naturalSizeRef.current = natural; const wrap = wrapRef.current; const nextBaseSize = fitPreviewSize(natural, wrap ? { width: wrap.clientWidth, height: wrap.clientHeight } : natural); setBaseSize(nextBaseSize); setOffset((current) => clamp(current, zoom, nextBaseSize)); }} style={{ width: `${baseSize.width}px`, height: `${baseSize.height}px`, transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} draggable={false} /> : <div className="image-missing">预览不可用</div>}</div><div className="preview-zoom-actions"><span>{Math.round(zoom * 100)}%</span><button onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>重置</button></div><div className="preview-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{image.status === "classified" ? "已归档图片" : "临时图片"}</span></div><div className="preview-actions"><button onClick={() => { if (cardRef.current) onClassify(cardRef.current); }}>分类</button><button onClick={onCopy}>复制</button><button onClick={() => onRename(image)}>重命名</button>{image.status === "classified" && <button className="danger-link" onClick={() => onDelete([image.id])}>删除</button>}</div></section></div>;
 }
 
-function QuickActions({ state, selectedIds, anchor, showRemove, onClose, onUpdate, onError, onNotice, onPrompt }: { state: AppState; selectedIds: string[]; anchor: PanelAnchor | null; showRemove: boolean; onClose: () => void; onUpdate: (state: AppState) => void; onError: (message: string) => void; onNotice: (message: string) => void; onPrompt: (title: string, value?: string) => Promise<string | null> }) {
+function QuickActions({ state, selectedIds, source, anchor, showRemove, onClose, onUpdate, onError, onNotice, onCopy, onPrompt, onRename, onDelete }: { state: AppState; selectedIds: string[]; source: HTMLElement | null; anchor: PanelAnchor | null; showRemove: boolean; onClose: () => void; onUpdate: (state: AppState) => void; onError: (message: string) => void; onNotice: (message: string) => void; onCopy: (ids: string[]) => Promise<void>; onPrompt: (title: string, value?: string) => Promise<string | null>; onRename: (image: ImageRecord) => void; onDelete: (ids: string[]) => void }) {
   const [busy, setBusy] = useState(false);
+  const [position, setPosition] = useState<PanelAnchor | null>(anchor);
+  const copyBusyRef = useRef(false);
+  const asideRef = useRef<HTMLElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setPosition(anchor);
+    if (!anchor || !asideRef.current) return;
+    const shell = asideRef.current.closest<HTMLElement>(".app-shell");
+    if (!shell) return;
+    const width = asideRef.current.offsetWidth;
+    const height = asideRef.current.offsetHeight;
+    const maxLeft = Math.max(12, shell.clientWidth - width - 12);
+    const maxTop = Math.max(12, shell.clientHeight - height - 12);
+    setPosition({
+      left: Math.round(Math.max(12, Math.min(anchor.left, maxLeft))),
+      top: Math.round(Math.max(12, Math.min(anchor.top, maxTop))),
+    });
+  }, [anchor, selectedIds.length, state.categories.length, showRemove]);
+  useLayoutEffect(() => {
+    previouslyFocusedRef.current = source ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const first = asideRef.current?.querySelector<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    first?.focus();
+    return () => {
+      const origin = previouslyFocusedRef.current;
+      if (origin?.isConnected) origin.focus();
+    };
+  }, [source]);
+  useEffect(() => {
+    const focusable = () => Array.from(asideRef.current?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [])
+      .filter((element) => !element.hasAttribute("disabled"));
+    const outside = (event: PointerEvent) => {
+      if (hasBlockingDialog()) return;
+      // Right-clicking an image is an action on that image. In particular, do
+      // not let the capture-phase listener close the panel before the target's
+      // context-menu handler can preserve an existing multi-selection.
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      if (!asideRef.current?.contains(target as Node) && !target?.closest(".image-card, .library-card")) onClose();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || hasBlockingDialog()) return;
+      event.preventDefault(); event.stopPropagation(); onClose();
+    };
+    const keydown = (event: KeyboardEvent) => {
+      if (hasBlockingDialog()) return;
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      if (elements.length === 0) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("pointerdown", outside, true); document.addEventListener("keydown", escape, true); document.addEventListener("keydown", keydown, true);
+    return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); document.removeEventListener("keydown", keydown, true); };
+  }, [onClose]);
   const selected = selectedIds.map((id) => state.images[id]).filter(Boolean);
-  const classify = async (categoryId: string) => { setBusy(true); try { onUpdate(await window.imageBoard.classifyImages(selectedIds, categoryId)); onNotice("分类已保存"); onClose(); } catch (error) { onError(error instanceof Error ? error.message : "分类失败"); } finally { setBusy(false); } };
-  const createCategory = async () => { const name = await onPrompt("新建分类"); if (!name) return; setBusy(true); try { onUpdate(await window.imageBoard.createCategory(name)); onNotice("分类已创建"); } catch (error) { onError(error instanceof Error ? error.message : "创建分类失败"); } finally { setBusy(false); } };
-  const remove = async () => { setBusy(true); try { let next = state; for (const id of selectedIds) next = await window.imageBoard.removeImageFromCanvas(id); onUpdate(next); onClose(); } catch (error) { onError(error instanceof Error ? error.message : "移除失败"); } finally { setBusy(false); } };
-  const copy = async () => { try { const result = await window.imageBoard.copyImageFiles(selectedIds); onNotice(result.copied > 1 ? `已复制 ${result.copied} 个图片文件` : result.copied > 0 ? "已复制图片文件" : "没有复制图片文件"); } catch (error) { onError(error instanceof Error ? error.message : "复制失败"); } };
-  return <aside className={`quick-actions ${anchor ? "anchored" : ""}`} style={anchor ? { left: anchor.left, top: anchor.top } : undefined}><div className="quick-actions-title"><div><strong>{selectedIds.length > 1 ? `已选 ${selectedIds.length} 张图片` : "图片快捷操作"}</strong><span>{selected[0]?.status === "classified" ? "已归档图片" : "临时图片"}</span></div><button className="close-button" onClick={onClose} aria-label="关闭操作面板" title="关闭"><IconClose size={14} /></button></div><div className="category-label">选择分类{selectedIds.length > 1 ? "（批量）" : ""}</div><div className="category-grid">{state.categories.map((category) => <button key={category.id} disabled={busy} onClick={() => void classify(category.id)}>{category.name}</button>)}<button className="new-category" disabled={busy} onClick={() => void createCategory()}>＋ 新分类</button></div><div className="quick-actions-footer"><button onClick={() => void copy()}>复制图片文件</button>{showRemove && <button className="danger-link" disabled={busy} onClick={() => void remove()}>从画布移除</button>}</div></aside>;
+  const classify = async (categoryId: string) => { if (busy) return; setBusy(true); try { onUpdate(await window.imageBoard.classifyImages(selectedIds, categoryId)); onNotice("分类已保存"); onClose(); } catch (error) { onError(error instanceof Error ? error.message : "分类失败"); } finally { setBusy(false); } };
+  const createCategory = async () => { if (busy) return; const name = await onPrompt("新建分类"); if (!name) return; setBusy(true); try { onUpdate(await window.imageBoard.createCategory(name)); onNotice("分类已创建"); } catch (error) { onError(error instanceof Error ? error.message : "创建分类失败"); } finally { setBusy(false); } };
+  const remove = async () => { if (busy) return; setBusy(true); try { let next = state; for (const id of selectedIds) next = await window.imageBoard.removeImageFromCanvas(id); onUpdate(next); onClose(); } catch (error) { onError(error instanceof Error ? error.message : "移除失败"); } finally { setBusy(false); } };
+  const copy = async () => {
+    if (busy || copyBusyRef.current) return;
+    copyBusyRef.current = true;
+    setBusy(true);
+    try { await onCopy(selectedIds); }
+    finally { copyBusyRef.current = false; setBusy(false); }
+  };
+  return <aside ref={asideRef} role="dialog" aria-label="图片快捷操作" className={`quick-actions ${position ? "anchored" : ""}`} style={position ? { left: position.left, top: position.top } : undefined}><div className="quick-actions-title"><div><strong>{selectedIds.length > 1 ? `已选 ${selectedIds.length} 张图片` : "图片快捷操作"}</strong><span>{selected[0]?.status === "classified" ? "已归档图片" : "临时图片"}</span></div><button className="close-button" onClick={onClose} aria-label="关闭操作面板" title="关闭"><IconClose size={14} /></button></div><div className="category-label">选择分类{selectedIds.length > 1 ? "（批量）" : ""}</div><div className="category-grid">{state.categories.map((category) => <button key={category.id} disabled={busy} onClick={() => void classify(category.id)}>{category.name}</button>)}<button className="new-category" disabled={busy} onClick={() => void createCategory()}>＋ 新分类</button></div><div className="quick-actions-footer"><button disabled={busy} onClick={() => void copy()}>复制图片文件</button>{selected.length === 1 && <button disabled={busy} onClick={() => onRename(selected[0])}>重命名</button>}{!showRemove && selected.length > 0 && <button className="danger-link" disabled={busy} onClick={() => onDelete(selectedIds)}>删除分类图片</button>}{showRemove && <button className="danger-link" disabled={busy} onClick={() => void remove()}>从画布移除</button>}</div></aside>;
 }
 
-function Library({ state, onPreview, onSelect, onCopy }: { state: AppState; onPreview: (id: string) => void; onSelect: (event: React.MouseEvent<HTMLElement> | null, id: string) => void; onCopy: (ids: string[]) => void }) {
+function Library({ state, selectedIds, onPreview, onSelect, onQuickActions, onCopy, onRename, onDelete }: { state: AppState; selectedIds: string[]; onPreview: (id: string) => void; onSelect: (event: React.MouseEvent<HTMLElement> | null, id: string, toggleSelection?: boolean) => void; onQuickActions: (event: React.MouseEvent<HTMLElement> | null, id: string) => void; onCopy: (ids: string[]) => void; onRename: (image: ImageRecord) => void; onDelete: (ids: string[]) => void }) {
   const categorized = useMemo(() => Object.values(state.images).filter((image) => image.status === "classified"), [state.images]);
-  return <section className="library-view"><div className="library-heading"><div><strong>分类图片库</strong><span>已分类图片不会因画布删除而消失</span></div><span>{categorized.length} 张</span></div>{state.categories.map((category) => { const images = categorized.filter((image) => image.categoryId === category.id); return <div className="library-group" key={category.id}><div className="library-group-title"><strong>{category.name}</strong><span>{images.length}</span></div>{images.length > 0 && <div className="library-grid">{images.map((image) => <article className="library-card" key={image.id} onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) onSelect(event, image.id); }} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("button")) { event.stopPropagation(); onPreview(image.id); } }}>{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} /> : <div className="image-missing">预览不可用</div>}<span title={image.fileName}>{image.fileName}</span><div className="library-card-actions"><button onClick={(event) => { event.stopPropagation(); onSelect(event, image.id); }}>重新分类</button><button onClick={() => onCopy([image.id])}>复制</button></div></article>)}</div>}</div>})}{categorized.length === 0 && <div className="library-empty">还没有已分类图片。回到画布，点击图片即可归档。</div>}</section>;
+  const keyboard = (event: React.KeyboardEvent<HTMLElement>, image: ImageRecord) => { if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) { event.preventDefault(); event.currentTarget.focus(); onQuickActions(null, image.id); } else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.focus(); if (event.shiftKey) onSelect(null, image.id, true); else onPreview(image.id); } };
+  return <section className="library-view"><div className="library-heading"><div><strong>分类图片库</strong><span>左键预览 · Shift 多选 · 右键快捷操作</span></div><span>{categorized.length} 张</span></div>{state.categories.map((category) => { const images = categorized.filter((image) => image.categoryId === category.id); return <div className="library-group" key={category.id}><div className="library-group-title"><strong>{category.name}</strong><span>{images.length}</span></div>{images.length > 0 && <div className="library-grid">{images.map((image) => { const selected = selectedIds.includes(image.id); return <article className={`library-card ${selected ? "selected" : ""}`} key={image.id} role="button" tabIndex={0} aria-selected={selected} aria-label={`图片 ${image.fileName}`} onKeyDown={(event) => keyboard(event, image)} onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) { if (event.shiftKey) onSelect(event, image.id, true); else onPreview(image.id); } }} onContextMenu={(event) => onQuickActions(event, image.id)}><div className="library-card-media">{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} /> : <div className="image-missing">预览不可用</div>}</div><span title={image.fileName}>{image.fileName}</span><div className="library-card-actions"><button onClick={(event) => { event.stopPropagation(); onQuickActions(event, image.id); }}>重新分类</button><button onClick={(event) => { event.stopPropagation(); onRename(image); }}>重命名</button><button onClick={(event) => { event.stopPropagation(); onCopy([image.id]); }}>复制</button><button className="danger-link" onClick={(event) => { event.stopPropagation(); onDelete([image.id]); }}>删除</button></div></article>; })}</div>}</div>})}{categorized.length === 0 && <div className="library-empty">还没有已分类图片。回到画布后右键图片分类，或先粘贴图片。</div>}</section>;
 }
 
 function Dialog({ dialog, onClose }: { dialog: DialogState; onClose: () => void }) {
@@ -893,6 +1178,16 @@ function Dialog({ dialog, onClose }: { dialog: DialogState; onClose: () => void 
   const cancelRef = useRef<HTMLButtonElement>(null);
   const previouslyFocusedRef = useRef<Element | null>(null);
   const [value, setValue] = useState(dialog.kind === "prompt" ? dialog.value : "");
+  const [position, setPosition] = useState<PanelAnchor | null>(null);
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const container = card?.parentElement;
+    if (!card || !container || !dialog.anchor) return;
+    setPosition({
+      left: Math.max(12, Math.min(dialog.anchor.left, container.clientWidth - card.offsetWidth - 12)),
+      top: Math.max(12, Math.min(dialog.anchor.top, container.clientHeight - card.offsetHeight - 12)),
+    });
+  }, [dialog]);
 
   useEffect(() => {
     previouslyFocusedRef.current = document.activeElement;
@@ -911,6 +1206,12 @@ function Dialog({ dialog, onClose }: { dialog: DialogState; onClose: () => void 
       cancelRef.current?.focus();
     }
     const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(dialog.kind === "prompt" ? null : false);
+        return;
+      }
       if (event.key !== "Tab") return;
       const elements = focusable();
       if (!elements || elements.length === 0) return;
@@ -941,7 +1242,7 @@ function Dialog({ dialog, onClose }: { dialog: DialogState; onClose: () => void 
       finish(dialog.kind === "prompt" ? null : false);
     }
   };
-  return <div className="dialog-backdrop" onMouseDown={() => finish(dialog.kind === "prompt" ? null : false)}><section ref={cardRef} className="dialog-card" role="alertdialog" aria-modal="true" aria-label={dialog.title} onKeyDown={handleKey} onMouseDown={(event) => event.stopPropagation()}><strong>{dialog.title}</strong>{dialog.kind === "prompt" ? <input ref={inputRef} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") finish(value); if (event.key === "Escape") finish(null); }} /> : <p>{dialog.message}</p>}<div className="dialog-actions"><button ref={cancelRef} onClick={() => finish(dialog.kind === "prompt" ? null : false)}>取消</button><button className={dialog.kind === "confirm" ? "danger-button" : "primary-button"} onClick={() => finish(dialog.kind === "prompt" ? value : true)}>{dialog.kind === "confirm" ? "删除" : "确定"}</button></div></section></div>;
+  return <div className="dialog-backdrop" onMouseDown={() => finish(dialog.kind === "prompt" ? null : false)}><section ref={cardRef} className="dialog-card" style={position ? { position: "absolute", left: position.left, top: position.top } : undefined} role="alertdialog" aria-modal="true" aria-label={dialog.title} onKeyDown={handleKey} onMouseDown={(event) => event.stopPropagation()}><strong>{dialog.title}</strong>{dialog.kind === "prompt" ? <input ref={inputRef} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") finish(value); if (event.key === "Escape") finish(null); }} /> : <p>{dialog.message}</p>}<div className="dialog-actions"><button ref={cancelRef} onClick={() => finish(dialog.kind === "prompt" ? null : false)}>取消</button><button className={dialog.kind === "confirm" ? "danger-button" : "primary-button"} onClick={() => finish(dialog.kind === "prompt" ? value : true)}>{dialog.kind === "confirm" ? "删除" : "确定"}</button></div></section></div>;
 }
 
 export default App;

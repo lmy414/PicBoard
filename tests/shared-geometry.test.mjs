@@ -3,6 +3,8 @@ import test from "node:test";
 
 const look = await import("../shared/look-geometry.ts");
 const miniMap = await import("../shared/minimap-geometry.ts");
+const selection = await import("../shared/canvas-selection.ts");
+const preview = await import("../shared/preview-geometry.ts");
 
 test("pointer look mapping keeps fixed bounded outputs for normal, extreme, and invalid input", () => {
   assert.deepEqual(look.pointerToLookTarget(0, 0), { yaw: 0, pitch: -0 });
@@ -28,4 +30,29 @@ test("mini-map projection preserves negative coordinates, zoom, image bounds, an
   const geometry = miniMap.createMiniMapGeometry(images, viewport, 60, 60);
   assert.deepEqual(geometry, expected);
   assert.deepEqual(miniMap.miniMapToWorld(geometry, 30, 30), { x: 0, y: 0 });
+});
+
+test("canvas selection distinguishes replace, toggle, and rectangle selection", () => {
+  assert.deepEqual(selection.applySelection([], "a", false), ["a"]);
+  assert.deepEqual(selection.applySelection(["a", "b"], "b", true), ["a"]);
+  assert.deepEqual(selection.applySelection(["a"], "b", true), ["a", "b"]);
+  const images = [
+    { id: "a", x: 0, y: 0, width: 20, height: 20 },
+    { id: "b", x: 25, y: 10, width: 20, height: 20 },
+    { id: "c", x: 100, y: 100, width: 20, height: 20 },
+  ];
+  assert.deepEqual(selection.imagesInSelectionRect(images, { x: 10, y: 5, width: 40, height: 30 }), ["a", "b"]);
+  assert.deepEqual(selection.mergeSelection(["c"], ["a", "c"], true), ["c", "a"]);
+});
+
+test("preview geometry uses fit-size centered zoom and clamps pan offsets", () => {
+  assert.equal(preview.clampPreviewZoom(0.2), 1);
+  assert.equal(preview.clampPreviewZoom(9), 8);
+  assert.deepEqual(preview.fitPreviewSize({ width: 1600, height: 800 }, { width: 400, height: 300 }), { width: 400, height: 200 });
+  // QuickPreview centers the fitted image and applies `translate(offset) scale(zoom)`
+  // around the viewport center. Translation is the outer transform here, so an
+  // existing offset scales when preserving a pointer-centered image point.
+  assert.deepEqual(preview.zoomAroundPoint({ x: 0, y: 150 }, 1, 2, { x: 0, y: 0 }, { width: 400, height: 300 }), { x: 200, y: 0 });
+  assert.deepEqual(preview.zoomAroundPoint({ x: 200, y: 150 }, 1, 2, { x: 40, y: -20 }, { width: 400, height: 300 }), { x: 80, y: -40 });
+  assert.deepEqual(preview.clampPreviewOffset({ x: 500, y: -500 }, { width: 200, height: 100 }, { width: 400, height: 300 }, 2), { x: 300, y: -250 });
 });

@@ -17,7 +17,7 @@
 use crate::error::AppError;
 use crate::platform;
 use crate::window_geometry::{self, Rect, WindowGeometryState};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -31,7 +31,9 @@ struct Inner {
     handle: AppHandle,
     geometry: Mutex<WindowGeometryState>,
     cursor_active: AtomicBool,
+    cursor_generation: AtomicU64,
     drag_active: AtomicBool,
+    drag_generation: AtomicU64,
     shutdown_requested: AtomicBool,
     drag_start: Mutex<Option<DragAnchor>>,
     drag_operation: Mutex<()>,
@@ -57,6 +59,12 @@ pub struct WindowController {
 fn main_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
     app.get_webview_window("main")
         .ok_or_else(|| AppError::message("主窗口不存在"))
+}
+
+fn reap_thread(thread: std::thread::JoinHandle<()>) {
+    std::thread::spawn(move || {
+        let _ = thread.join();
+    });
 }
 
 fn logical_rect(win: &WebviewWindow) -> Result<Rect, AppError> {
@@ -139,7 +147,9 @@ impl WindowController {
                 handle,
                 geometry: Mutex::new(window_geometry::create_window_geometry_state()),
                 cursor_active: AtomicBool::new(false),
+                cursor_generation: AtomicU64::new(0),
                 drag_active: AtomicBool::new(false),
+                drag_generation: AtomicU64::new(0),
                 shutdown_requested: AtomicBool::new(false),
                 drag_start: Mutex::new(None),
                 drag_operation: Mutex::new(()),
@@ -208,8 +218,9 @@ impl WindowController {
         let previous = thread_slot.take();
         drop(thread_slot);
         if let Some(previous) = previous {
-            let _ = previous.join();
+            reap_thread(previous);
         }
+        let generation = self.inner.drag_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let win = main_window(&self.inner.handle)?;
         let cursor = platform::cursor_position()?;
         let scale = win.scale_factor()?;
@@ -230,9 +241,13 @@ impl WindowController {
         let inner = Arc::clone(&self.inner);
         let thread = std::thread::spawn(move || {
             let mut released_since = 0u32;
-            while inner.drag_active.load(Ordering::SeqCst) {
+            while inner.drag_active.load(Ordering::SeqCst)
+                && inner.drag_generation.load(Ordering::Acquire) == generation
+            {
                 std::thread::sleep(Duration::from_millis(DRAG_POLL_MS));
-                if !inner.drag_active.load(Ordering::SeqCst) {
+                if !inner.drag_active.load(Ordering::SeqCst)
+                    || inner.drag_generation.load(Ordering::Acquire) != generation
+                {
                     break;
                 }
                 // Host-side fallback: if the physical left button is up for a
@@ -243,14 +258,20 @@ impl WindowController {
                     released_since += 1;
                     // ~120ms of released button is enough to declare the drag over.
                     if released_since >= 15 {
-                        eprintln!("[window] drag auto-ended (left button released)");
-                        inner.drag_active.store(false, Ordering::Release);
-                        inner
-                            .drag_start
+                        let _operation = inner
+                            .drag_operation
                             .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .take();
-                        spawn_cursor_thread(&inner);
+                            .unwrap_or_else(|poison| poison.into_inner());
+                        if inner.drag_generation.load(Ordering::Acquire) == generation {
+                            eprintln!("[window] drag auto-ended (left button released)");
+                            inner.drag_active.store(false, Ordering::Release);
+                            inner
+                                .drag_start
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner())
+                                .take();
+                            spawn_cursor_thread(&inner);
+                        }
                         break;
                     }
                 } else {
@@ -265,8 +286,14 @@ impl WindowController {
                     Ok(())
                 })();
                 if let Err(error) = result {
-                    eprintln!("[window] drag poll failed: {error}");
-                    inner.drag_active.store(false, Ordering::Release);
+                    let _operation = inner
+                        .drag_operation
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner());
+                    if inner.drag_generation.load(Ordering::Acquire) == generation {
+                        eprintln!("[window] drag poll failed: {error}");
+                        inner.drag_active.store(false, Ordering::Release);
+                    }
                     break;
                 }
             }
@@ -286,6 +313,7 @@ impl WindowController {
             .drag_operation
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        self.inner.drag_generation.fetch_add(1, Ordering::AcqRel);
         let was_active = self.inner.drag_active.swap(false, Ordering::AcqRel);
         if let Some(thread) = self
             .inner
@@ -294,7 +322,7 @@ impl WindowController {
             .unwrap_or_else(|poison| poison.into_inner())
             .take()
         {
-            let _ = thread.join();
+            reap_thread(thread);
         }
         if !was_active {
             self.inner
@@ -331,17 +359,17 @@ impl WindowController {
         spawn_cursor_thread(&self.inner);
     }
 
-    /// Stop the cursor publisher and wait for its thread.
+    /// Signal the publisher without blocking the window message loop.
     pub fn stop_cursor_tracking(&self) {
-        self.inner.cursor_active.store(false, Ordering::Release);
-        if let Some(thread) = self
+        let mut slot = self
             .inner
             .cursor_thread
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .take()
-        {
-            let _ = thread.join();
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.inner.cursor_generation.fetch_add(1, Ordering::AcqRel);
+        self.inner.cursor_active.store(false, Ordering::Release);
+        if let Some(thread) = slot.take() {
+            reap_thread(thread);
         }
     }
 
@@ -353,6 +381,7 @@ impl WindowController {
             .drag_operation
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        self.inner.drag_generation.fetch_add(1, Ordering::AcqRel);
         self.inner.drag_active.store(false, Ordering::Release);
         self.inner
             .drag_start
@@ -366,6 +395,7 @@ impl WindowController {
     pub fn request_teardown(&self) {
         self.inner.shutdown_requested.store(true, Ordering::Release);
         self.inner.cursor_active.store(false, Ordering::Release);
+        self.inner.drag_generation.fetch_add(1, Ordering::AcqRel);
         self.inner.drag_active.store(false, Ordering::Release);
         self.inner
             .drag_start
@@ -461,16 +491,29 @@ fn apply_expansion(
 /// running. Idempotent; safe to call from any thread (including the drag loop
 /// after an auto-end).
 fn spawn_cursor_thread(inner: &Arc<Inner>) {
+    let mut slot = inner
+        .cursor_thread
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     if inner.shutdown_requested.load(Ordering::Acquire)
         || inner.cursor_active.swap(true, Ordering::AcqRel)
     {
         return;
     }
+    let generation = inner.cursor_generation.fetch_add(1, Ordering::AcqRel) + 1;
+    if let Some(previous) = slot.take() {
+        reap_thread(previous);
+    }
     let thread_inner = Arc::clone(inner);
     let thread = std::thread::spawn(move || {
         let mut empty_loops = 0u32;
-        while thread_inner.cursor_active.load(Ordering::SeqCst) {
+        while thread_inner.cursor_active.load(Ordering::SeqCst)
+            && thread_inner.cursor_generation.load(Ordering::Acquire) == generation
+        {
             std::thread::sleep(Duration::from_millis(CURSOR_POLL_MS));
+            if thread_inner.cursor_generation.load(Ordering::Acquire) != generation {
+                break;
+            }
             if !thread_inner.cursor_active.load(Ordering::SeqCst)
                 || thread_inner.drag_active.load(Ordering::SeqCst)
             {
@@ -501,10 +544,13 @@ fn spawn_cursor_thread(inner: &Arc<Inner>) {
             });
             let _ = window.emit("window:cursor-position", payload);
         }
-        thread_inner.cursor_active.store(false, Ordering::Release);
+        let _slot = thread_inner
+            .cursor_thread
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if thread_inner.cursor_generation.load(Ordering::Acquire) == generation {
+            thread_inner.cursor_active.store(false, Ordering::Release);
+        }
     });
-    *inner
-        .cursor_thread
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner()) = Some(thread);
+    *slot = Some(thread);
 }

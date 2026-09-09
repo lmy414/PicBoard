@@ -30,7 +30,16 @@ tauri = { version = "2.11.5", default-features = false, features = ["wry", "comm
 tauri-plugin-dialog = "2.7.2"
 uuid = { version = "1.18", features = ["v4"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_UI_Shell"
+] }
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

@@ -86,6 +86,8 @@ export interface ImageBoardApi {
   removeImageFromCanvas(imageId: string): Promise<AppState>;
   moveImage(imageId: string, x: number, y: number): Promise<AppState>;
   copyImageFiles(imageIds: string[]): Promise<{ copied: number }>;
+  renameImage(imageId: string, name: string): Promise<AppState>;
+  deleteClassifiedImages(imageIds: string[]): Promise<AppState>;
   getExpanded(): Promise<boolean>;
   setExpanded(expanded: boolean): Promise<void>;
   closeWindow(): Promise<void>;

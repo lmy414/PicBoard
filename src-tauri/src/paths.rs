@@ -23,8 +23,8 @@ pub fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf, AppError> {
         }
         PathBuf::from(value)
     } else {
-        let base = dirs::data_dir()
-            .ok_or_else(|| AppError::message("无法解析 Windows 用户数据目录"))?;
+        let base =
+            dirs::data_dir().ok_or_else(|| AppError::message("无法解析 Windows 用户数据目录"))?;
         // Electron: app.getPath("userData") = %APPDATA%/quick-image-board; storage = userData/quick-image-board
         base.join("quick-image-board").join("quick-image-board")
     };
@@ -37,14 +37,24 @@ pub fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf, AppError> {
 /// Resolve a storage-relative path under `root` while rejecting traversal.
 /// Accepts legacy `/` and `\` separators; rejects absolute, drive/UNC and `..` escapes.
 pub fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, AppError> {
-    let candidate = Path::new(relative);
-    if candidate.is_absolute() {
+    // State files may have been written on another platform, so normalize
+    // both separator spellings before asking `Path` to inspect components.
+    // This also makes the traversal check work when Linux tests read a legacy
+    // Windows state file.
+    let normalized = relative.replace('\\', "/");
+    let candidate = Path::new(&normalized);
+    let has_drive_prefix = normalized.len() >= 2
+        && normalized.as_bytes()[1] == b':'
+        && normalized.as_bytes()[0].is_ascii_alphabetic();
+    if candidate.is_absolute() || normalized.starts_with('/') || has_drive_prefix {
         return Err(AppError::message("图片路径不能是绝对路径"));
     }
-    if candidate
-        .components()
-        .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
-    {
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return Err(AppError::message("图片路径越界"));
     }
     Ok(root.join(candidate))

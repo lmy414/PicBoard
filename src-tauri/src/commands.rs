@@ -6,7 +6,10 @@
 //! `Uint8Array` arguments arrive as `Vec<u8>` thanks to Tauri's IPC serializer;
 //! `dataUrl` values never leave the snapshot (they are stripped before persist).
 
-use crate::dto::{AppState, CanvasViewport, CopyResult, DesktopSettingsDto, ImportImagePayload, ImportViewport, PasteResult};
+use crate::dto::{
+    AppState, CanvasViewport, CopyResult, DesktopSettingsDto, ImportImagePayload, ImportViewport,
+    PasteResult,
+};
 use crate::error::AppError;
 use crate::preferences::{PreferenceStore, BALL_SETTINGS_KEY, PATH_SETTINGS_KEY};
 use crate::storage::ImageBoardStorage;
@@ -21,9 +24,7 @@ fn with_storage<T>(
     storage: &State<'_, SharedStorage>,
     operation: impl FnOnce(&mut ImageBoardStorage) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
-    let mut guard = storage
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let mut guard = storage.lock().unwrap_or_else(|poison| poison.into_inner());
     operation(&mut guard)
 }
 
@@ -39,7 +40,9 @@ pub fn import_images(
     images: Vec<ImportImagePayload>,
     viewport: Option<ImportViewport>,
 ) -> Result<AppState, AppError> {
-    with_storage(&storage, |store| store.import_images(&canvas_id, images, viewport))
+    with_storage(&storage, |store| {
+        store.import_images(&canvas_id, images, viewport)
+    })
 }
 
 #[tauri::command]
@@ -67,7 +70,9 @@ pub fn set_canvas_viewport(
     canvas_id: String,
     viewport: CanvasViewport,
 ) -> Result<AppState, AppError> {
-    with_storage(&storage, |store| store.set_canvas_viewport(&canvas_id, viewport))
+    with_storage(&storage, |store| {
+        store.set_canvas_viewport(&canvas_id, viewport)
+    })
 }
 
 #[tauri::command]
@@ -106,7 +111,9 @@ pub fn classify_images(
     image_ids: Vec<String>,
     category_id: String,
 ) -> Result<AppState, AppError> {
-    with_storage(&storage, |store| store.classify_images(&image_ids, &category_id))
+    with_storage(&storage, |store| {
+        store.classify_images(&image_ids, &category_id)
+    })
 }
 
 #[tauri::command]
@@ -131,18 +138,35 @@ pub fn move_image(
 /// while holding the storage lock, then releases it before touching the
 /// clipboard so a slow/busy clipboard never blocks other storage work.
 #[tauri::command]
+pub fn rename_image(
+    storage: State<'_, SharedStorage>,
+    image_id: String,
+    name: String,
+) -> Result<AppState, AppError> {
+    with_storage(&storage, |store| store.rename_image(&image_id, &name))
+}
+
+#[tauri::command]
+pub fn delete_classified_images(
+    storage: State<'_, SharedStorage>,
+    image_ids: Vec<String>,
+) -> Result<AppState, AppError> {
+    with_storage(&storage, |store| store.delete_classified_images(&image_ids))
+}
+
+#[tauri::command]
 pub fn copy_image_files(
     storage: State<'_, SharedStorage>,
     image_ids: Vec<String>,
 ) -> Result<CopyResult, AppError> {
     let paths = {
-        let mut guard = storage
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut guard = storage.lock().unwrap_or_else(|poison| poison.into_inner());
         guard.image_paths(&image_ids)?
     };
     crate::clipboard::write_image_files(&paths)?;
-    Ok(CopyResult { copied: paths.len() })
+    Ok(CopyResult {
+        copied: paths.len(),
+    })
 }
 
 /// Returns validated migration preferences (if any) as a JSON object with the
@@ -171,10 +195,7 @@ pub fn get_expanded(window: State<'_, WindowController>) -> bool {
 }
 
 #[tauri::command]
-pub fn set_expanded(
-    window: State<'_, WindowController>,
-    expanded: bool,
-) -> Result<(), AppError> {
+pub fn set_expanded(window: State<'_, WindowController>, expanded: bool) -> Result<(), AppError> {
     window.set_expanded(expanded)
 }
 
@@ -208,16 +229,26 @@ pub fn set_desktop_settings(
     let mut close_behavior: Option<CloseBehavior> = None;
     let mut auto_start: Option<bool> = None;
     if let Some(value) = patch.get("closeBehavior") {
-        let behavior = value.as_str().ok_or_else(|| AppError::message("closeBehavior 必须是字符串"))?;
+        let behavior = value
+            .as_str()
+            .ok_or_else(|| AppError::message("closeBehavior 必须是字符串"))?;
         close_behavior = Some(match behavior {
             "float" => CloseBehavior::Float,
             "tray" => CloseBehavior::Tray,
             "quit" => CloseBehavior::Quit,
-            _ => return Err(AppError::message(format!("未知的 closeBehavior：{behavior}"))),
+            _ => {
+                return Err(AppError::message(format!(
+                    "未知的 closeBehavior：{behavior}"
+                )))
+            }
         });
     }
     if let Some(value) = patch.get("autoStart") {
-        auto_start = Some(value.as_bool().ok_or_else(|| AppError::message("autoStart 必须是布尔值"))?);
+        auto_start = Some(
+            value
+                .as_bool()
+                .ok_or_else(|| AppError::message("autoStart 必须是布尔值"))?,
+        );
     }
     if close_behavior.is_none() && auto_start.is_none() {
         // No-op: still return the current state.

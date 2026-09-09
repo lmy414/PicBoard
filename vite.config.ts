@@ -8,9 +8,15 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     watch: {
-      // Rust build output changes constantly under tauri dev; watching the
-      // dll/executables on Windows triggers EBUSY and kills Vite.
-      ignored: ["**/src-tauri/target/**", "**/dist/**"],
+      // Native build artifacts and isolated app data change while Tauri is
+      // running. Windows may lock their temporary files, so Vite must never
+      // attach file watchers to either tree.
+      ignored: [
+        "**/src-tauri/target/**",
+        "**/dist/**",
+        "**/.tmp-gui-data*/**",
+        "**/.quick-image-board-dev-data/**",
+      ],
     },
   },
 });

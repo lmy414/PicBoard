@@ -69,13 +69,28 @@ test("every tray show path restores cursor tracking", async () => {
   }
 });
 
-test("drag end is idempotent and cannot revive cursor tracking after cancellation", async () => {
+test("drag end is idempotent, generation-scoped, and never joins on the interaction path", async () => {
   const controller = await source("src-tauri/src/window_controller.rs");
+  const start = branchBetween(controller, "pub fn start_window_drag", "/// End the custom drag");
   const end = branchBetween(controller, "pub fn end_window_drag", "/// Start the 50ms cursor publisher");
+  assert.match(start, /drag_generation\.fetch_add\(1/);
+  assert.match(start, /drag_generation\.load\(Ordering::Acquire\) == generation/);
+  assert.match(end, /drag_generation\.fetch_add\(1/);
   assert.match(end, /let was_active = self\.inner\.drag_active\.swap\(false/);
   assert.match(end, /if !was_active/);
-  assert.match(end, /return;/);
-  assertOrdered(end, ["drag_active.swap(false", "thread.join()", "if !was_active", "self.start_cursor_tracking()"]);
+  assert.match(end, /reap_thread\(thread\)/);
+  assert.doesNotMatch(end, /thread\.join\(\)/);
+  assertOrdered(end, ["drag_generation.fetch_add(1", "drag_active.swap(false", "reap_thread(thread)", "if !was_active", "self.start_cursor_tracking()"]);
+});
+
+test("cursor stop does not join a worker waiting for window messages", async () => {
+  const controller = await source("src-tauri/src/window_controller.rs");
+  const stop = branchBetween(controller, "pub fn stop_cursor_tracking", "/// Stop the drag loop");
+  assert.match(stop, /cursor_generation\.fetch_add\(1/);
+  assert.match(stop, /reap_thread\(thread\)/);
+  assert.doesNotMatch(stop, /thread\.join\(\)/);
+  const spawn = controller.slice(controller.indexOf("fn spawn_cursor_thread"));
+  assert.match(spawn, /cursor_generation\.load\(Ordering::Acquire\) == generation/);
 });
 
 test("renderer hydrates native expansion state before the first frame after reload", async () => {

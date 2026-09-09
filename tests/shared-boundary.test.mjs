@@ -21,6 +21,8 @@ test("neutral shared modules do not import host or renderer runtime APIs", async
     "shared/image-board.ts",
     "shared/look-geometry.ts",
     "shared/minimap-geometry.ts",
+    "shared/canvas-selection.ts",
+    "shared/preview-geometry.ts",
   ];
 
   for (const relativePath of files) {
@@ -42,6 +44,8 @@ test("renderer source depends on neutral modules and the Tauri platform adapter"
   const bootstrap = await readFile(path.join(root, "renderer/src/platform/bootstrap.ts"), "utf8");
   assert.match(app, /from "\.\.\/\.\.\/shared\/image-board"/);
   assert.match(app, /from "\.\.\/\.\.\/shared\/minimap-geometry"/);
+  assert.match(app, /from "\.\.\/\.\.\/shared\/canvas-selection"/);
+  assert.match(app, /from "\.\.\/\.\.\/shared\/preview-geometry"/);
   assert.match(ball, /from "\.\.\/\.\.\/shared\/look-geometry"/);
   assert.match(bootstrap, /isTauri\(\)/);
   assert.match(bootstrap, /createTauriAdapter\(\)/);
