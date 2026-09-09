@@ -1,3 +1,4 @@
+import { QuickActions } from "./ui/ImageActions";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import type { AppState, CanvasViewport, ImageBoardApi, ImageRecord, ImportViewport } from "../../shared/image-board";
@@ -113,6 +114,27 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const previewIdRef = useRef<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const titleDragRef = useRef<{ x: number; y: number; pointer: number } | null>(null);
+  const titleDragBusy = useRef(false);
+  const titleDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = titleDragRef.current;
+    if (!start || start.pointer !== event.pointerId || !(event.buttons & 1) || titleDragBusy.current) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
+    titleDragRef.current = null;
+    titleDragBusy.current = true;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    void window.imageBoard.startTitlebarDrag().then(() => setMaximized(false)).catch((caught) => showError(caught instanceof Error ? caught.message : "拖动窗口失败")).finally(() => { titleDragBusy.current = false; });
+  };
+  const [maximized, setMaximized] = useState(false);
+  const maximizeBusy = useRef(false);
+  const toggleMaximize = async () => {
+    if (maximizeBusy.current) return;
+    maximizeBusy.current = true;
+    try { setMaximized(await window.imageBoard.toggleMaximized()); }
+    catch (caught) { showError(caught instanceof Error ? caught.message : "切换窗口大小失败"); }
+    finally { maximizeBusy.current = false; }
+  };
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectionAnchor, setSelectionAnchor] = useState<PanelAnchor | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -214,6 +236,7 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   }, [applyState, showError]);
 
   const clearInteraction = useCallback(() => {
+    setActionsOpen(false);
     setSelectedIds([]);
     previewIdRef.current = null;
     setPreviewId(null);
@@ -481,7 +504,7 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
       if (!panelVisible || isEditableTarget(target) || target?.closest("input, textarea, select, [contenteditable=true], .dialog-card")) return;
       // The preview modal owns Escape; other global shortcuts (for example
       // copying or removing the current preview) remain available.
-      if (previewId && event.key === "Escape") return;
+      if ((previewId || document.querySelector(".quick-actions")) && event.key === "Escape") return;
       if (event.key === "Escape") {
         if (previewId || selectedIds.length > 0 || hoveredId) {
           event.preventDefault();
@@ -599,6 +622,7 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   };
 
   const openPreview = (imageId: string) => {
+    setActionsOpen(false);
     previewIdRef.current = imageId;
     setPreviewId(imageId);
     setSelectedIds([]);
@@ -609,6 +633,10 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
     event?.preventDefault();
     event?.stopPropagation();
     const source = event?.currentTarget ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const card = source?.closest<HTMLElement>(".image-card, .library-card") ?? source;
+    const previousCard = quickActionsSource?.closest<HTMLElement>(".image-card, .library-card") ?? quickActionsSource;
+    if (event?.type === "click" && actionsOpen && card === previousCard) { setActionsOpen(false); return; }
+    setActionsOpen(true);
     setQuickActionsSource(source);
     if (!selectedIds.includes(imageId)) setSelectedIds([imageId]);
     previewIdRef.current = null;
@@ -653,8 +681,48 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
     void persistViewport(nextOffset, zoomRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistViewport]);
+  useEffect(() => {
+    let active = true;
+    void window.imageBoard.isMaximized().then((value) => { if (active) setMaximized(value); }).catch(() => {});
+    return () => { active = false; };
+  }, [panelVisible]);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const canvasId = state?.activeCanvasId;
+    if (!viewport || !canvasId || viewMode !== "canvas" || !panelVisible) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pending: CanvasViewport | null = null;
+    const flush = () => {
+      if (!pending) return;
+      const next = pending;
+      pending = null;
+      void window.imageBoard.setCanvasViewport(canvasId, next).catch((caught) => showError(caught instanceof Error ? caught.message : "视角保存失败"));
+    };
+    const wheel = (event: WheelEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (document.querySelector(".preview-backdrop, .dialog-card") || target?.closest(".quick-actions, .mini-map, input, textarea, select")) return;
+      event.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1);
+      const oldZoom = zoomRef.current;
+      const nextZoom = Math.max(0.5, Math.min(1.5, oldZoom * Math.exp(-Math.max(-300, Math.min(300, delta)) * 0.0015)));
+      if (nextZoom === oldZoom) return;
+      const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const oldOffset = worldOffsetRef.current;
+      const nextOffset = { x: point.x - (point.x - oldOffset.x) * nextZoom / oldZoom, y: point.y - (point.y - oldOffset.y) * nextZoom / oldZoom };
+      zoomRef.current = nextZoom;
+      worldOffsetRef.current = nextOffset;
+      setZoom(nextZoom); setWorldOffset(nextOffset);
+      pending = { ...nextOffset, zoom: nextZoom };
+      clearTimeout(timer);
+      timer = setTimeout(flush, 180);
+    };
+    viewport.addEventListener("wheel", wheel, { passive: false });
+    return () => { viewport.removeEventListener("wheel", wheel); clearTimeout(timer); flush(); };
+  }, [state?.activeCanvasId, viewMode, panelVisible, showError]);
 
   const canvasPoint = (event: React.PointerEvent) => {
     const rect = viewportRef.current?.getBoundingClientRect();
@@ -766,15 +834,16 @@ function App({ initialExpanded }: { initialExpanded: boolean }) {
   }
 
   return <main ref={appShellRef} className={`app-shell ${phase === "closing" ? "closing" : ""} ${dropActive ? "drop-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-    <header className="topbar"><div className="window-drag-region"><div className="brand-mark"><IntakeBall settings={ballSettings} variant="brand" /></div><div className="brand-copy"><strong>PicBoard</strong><span>{viewMode === "settings" ? "外观、路径与窗口行为" : "本地临时整理区"}</span></div></div><div className="topbar-actions"><button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button><button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button><button className={`icon-button no-drag settings-button ${viewMode === "settings" ? "active" : ""}`} aria-label="打开设置" title="打开设置" onClick={() => switchView("settings")}><IconGear size={15} /></button>{viewMode === "canvas" && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}<button className="icon-button no-drag" aria-label="收起画板" title="收起画板" onClick={() => requestExpand(false)}><IconMinus size={15} /></button><button className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button></div>{busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}</header>
+    <header className="topbar"><div className="window-drag-region" onPointerDown={(event) => { if (event.button !== 0) return; titleDragRef.current = { x: event.clientX, y: event.clientY, pointer: event.pointerId }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={titleDragMove} onPointerUp={() => { titleDragRef.current = null; }} onPointerCancel={() => { titleDragRef.current = null; }} onLostPointerCapture={() => { titleDragRef.current = null; }}><div className="brand-mark"><IntakeBall settings={ballSettings} variant="brand" /></div><div className="brand-copy"><strong>PicBoard</strong><span>{viewMode === "settings" ? "外观、路径与窗口行为" : "本地临时整理区"}</span></div></div><div className="topbar-actions"><button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button><button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button><button className={`icon-button no-drag settings-button ${viewMode === "settings" ? "active" : ""}`} aria-label="打开设置" title="打开设置" onClick={() => switchView("settings")}><IconGear size={15} /></button>{viewMode === "canvas" && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}<button className="icon-button no-drag" aria-label={maximized ? "还原小窗" : "最大化窗口"} title={maximized ? "还原小窗" : "最大化窗口"} onClick={() => void toggleMaximize()}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">{maximized ? <><path d="M5 5V2h9v9h-3" /><rect x="2" y="5" width="9" height="9" rx="1" /></> : <rect x="2.5" y="2.5" width="11" height="11" rx="1" />}</svg></button><button className="icon-button no-drag" aria-label="收起画板" title="收起画板" onClick={() => requestExpand(false)}><IconMinus size={15} /></button><button className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button></div>{busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}</header>
     {viewMode === "canvas" ? <>
       {showControls && <div className="canvas-controls"><div className="canvas-tabs">{state.canvases.map((canvas) => <button key={canvas.id} className={canvas.id === state.activeCanvasId ? "canvas-tab active" : "canvas-tab"} onClick={() => void changeCanvas(canvas.id)}>{canvas.name}<small>{canvas.imageIds.length}</small></button>)}<button className="add-canvas" onClick={() => { clearInteraction(); void update(() => window.imageBoard.createCanvas()); }}>＋ 新画布</button></div><div className="canvas-toolbar"><span className="toolbar-label">{activeCanvas?.name ?? "当前画布"}</span><span className="toolbar-hint">左键预览 · Shift 多选 · 右键快捷操作 · 空白拖框选 · 中键/Space 平移</span><div className="zoom-controls"><button title="缩小" aria-label="缩小" onClick={() => zoomBy(-0.1)}>−</button><span>{Math.round(zoom * 100)}%</span><button title="放大" aria-label="放大" onClick={() => zoomBy(0.1)}>＋</button><button className="locate-button" title="定位全部图片" onClick={locateAll}>定位全部</button></div></div></div>}
       <div ref={viewportRef} className={`canvas-viewport ${dropActive ? "drop-active" : ""} ${spacePressed ? "hand-tool" : ""}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} onLostPointerCapture={stopPan} onContextMenu={(event) => event.preventDefault()}><div className="canvas-world" style={{ transform: `translate(${worldOffset.x}px, ${worldOffset.y}px) scale(${zoom})` }}>{canvasImages.map((image) => <CanvasImage key={image.id} image={image} zoom={zoom} selected={selectedIds.includes(image.id)} selectedIds={selectedIds} onSelect={selectImage} onPreview={openPreview} onQuickActions={openQuickActions} spacePressed={spacePressed} onHover={setHoveredId} onMove={(id, x, y) => void update(() => window.imageBoard.moveImage(id, x, y))} />)}</div>{selectionRect && <div className="selection-rect" style={{ left: `${selectionRect.x * zoom + worldOffset.x}px`, top: `${selectionRect.y * zoom + worldOffset.y}px`, width: `${selectionRect.width * zoom}px`, height: `${selectionRect.height * zoom}px` }} />}{canvasImages.length === 0 && <div className="empty-canvas"><div className="empty-icon">↘</div><strong>把图片拖到悬浮窗</strong><span>或点击后使用 Ctrl+V 粘贴到当前画布</span></div>}{canvasImages.length > 0 && <MiniMap images={canvasImages} viewportRef={viewportRef} worldOffset={worldOffset} zoom={zoom} onPreview={previewViewport} onCommit={commitViewport} />}</div>
       {showControls && activeCanvas && <div className="footer-actions"><button onClick={() => void rename()}>重命名画布</button><button className="danger-link" onClick={() => void removeCanvas()}>删除画布</button></div>}
     </> : viewMode === "library" ? <Library state={state} selectedIds={selectedIds} onPreview={openPreview} onSelect={selectImage} onQuickActions={openQuickActions} onCopy={(ids) => void copyFiles(ids)} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} /> : <SettingsPage state={state} ballSettings={ballSettings} pathSettings={pathSettings} onBallSettingsChange={(patch) => setBallSettings((current) => ({ ...current, ...patch }))} onPathSettingsChange={(patch) => setPathSettings((current) => ({ ...current, ...patch }))} onResetBall={() => setBallSettings({ ...DEFAULT_BALL_SETTINGS })} onAddCategory={async () => { const name = await openPrompt("新建分类"); if (!name) return false; return update(() => window.imageBoard.createCategory(name)); }} />}
-    {selectedIds.length > 0 && viewMode === "canvas" && <QuickActions state={state} selectedIds={selectedIds} source={quickActionsSource} anchor={selectionAnchor} showRemove={true} onClose={clearInteraction} onUpdate={applyState} onError={showError} onNotice={showNotice} onCopy={copyFiles} onPrompt={openPrompt} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
-    {selectedIds.length > 0 && viewMode === "library" && <QuickActions state={state} selectedIds={selectedIds} source={quickActionsSource} anchor={selectionAnchor} showRemove={false} onClose={clearInteraction} onUpdate={applyState} onError={showError} onNotice={showNotice} onCopy={copyFiles} onPrompt={openPrompt} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
-    {previewImage && <QuickPreview image={previewImage} onClose={() => { previewIdRef.current = null; setPreviewId(null); setHoveredId(null); }} onClassify={(origin) => { setSelectedIds([previewImage.id]); setQuickActionsSource(null); setSelectionAnchor(panelAnchorFor(origin)); previewIdRef.current = null; setPreviewId(null); }} onCopy={() => void copyFiles([previewImage.id])} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
+    {!actionsOpen && !previewId && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选 {selectedIds.length} 张</span><button onClick={() => { const target = document.querySelector<HTMLElement>(".image-card.selected, .library-card.selected"); if (target) { setQuickActionsSource(target); setActionsOpen(true); } }}>操作</button><button onClick={clearInteraction}>取消选择</button></div>}
+    {actionsOpen && selectedIds.length > 0 && viewMode === "canvas" && <QuickActions state={state} selectedIds={selectedIds} source={quickActionsSource} anchor={selectionAnchor} showRemove={true} onClose={() => setActionsOpen(false)} onUpdate={applyState} onError={showError} onNotice={showNotice} onCopy={copyFiles} onPrompt={openPrompt} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
+    {actionsOpen && selectedIds.length > 0 && viewMode === "library" && <QuickActions state={state} selectedIds={selectedIds} source={quickActionsSource} anchor={selectionAnchor} showRemove={false} onClose={() => setActionsOpen(false)} onUpdate={applyState} onError={showError} onNotice={showNotice} onCopy={copyFiles} onPrompt={openPrompt} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
+    {previewImage && <QuickPreview image={previewImage} onClose={() => { setActionsOpen(false); previewIdRef.current = null; setPreviewId(null); setHoveredId(null); }} onClassify={(origin) => { setSelectedIds([previewImage.id]); setQuickActionsSource(origin); setActionsOpen((open) => !open); setSelectionAnchor(panelAnchorFor(origin)); }} onCopy={() => void copyFiles([previewImage.id])} onRename={(image) => void renameImage(image)} onDelete={(ids) => void deleteClassifiedImages(ids)} />}
     <ToastView toast={toast} onClose={clearToast} />
     {dialog && <Dialog dialog={dialog} onClose={clearDialog} />}
   </main>;
@@ -1024,7 +1093,7 @@ function QuickPreview({ image, onClose, onClassify, onCopy, onRename, onDelete }
     const focusable = () => Array.from(card?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []).filter((element) => !element.hasAttribute("disabled"));
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (hasBlockingDialog()) return;
+        if (hasBlockingDialog() || document.querySelector(".quick-actions")) return;
         event.preventDefault(); event.stopPropagation(); onCloseRef.current(); return;
       }
       if (event.key !== "Tab") return;
@@ -1091,85 +1160,14 @@ function QuickPreview({ image, onClose, onClassify, onCopy, onRename, onDelete }
     if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
   };
   useEffect(() => () => { dragRef.current = null; }, []);
-  return <div className="preview-backdrop" onMouseDown={onClose}><section ref={cardRef} className="preview-card" role="dialog" aria-modal="true" aria-label="图片预览" onMouseDown={(event) => event.stopPropagation()}><div className="preview-header"><span>快速预览</span><span className="preview-zoom">{Math.round(zoom * 100)}%</span><button ref={closeRef} className="close-button" onClick={onClose} aria-label="关闭预览" title="关闭预览"><IconClose size={14} /></button></div><div ref={wrapRef} className={`preview-image-wrap ${zoom > 1 ? "zoomed" : ""}`} onWheel={onWheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={lostPointerCapture}>{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} onLoad={(event) => { const natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; naturalSizeRef.current = natural; const wrap = wrapRef.current; const nextBaseSize = fitPreviewSize(natural, wrap ? { width: wrap.clientWidth, height: wrap.clientHeight } : natural); setBaseSize(nextBaseSize); setOffset((current) => clamp(current, zoom, nextBaseSize)); }} style={{ width: `${baseSize.width}px`, height: `${baseSize.height}px`, transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} draggable={false} /> : <div className="image-missing">预览不可用</div>}</div><div className="preview-zoom-actions"><span>{Math.round(zoom * 100)}%</span><button onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>重置</button></div><div className="preview-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{image.status === "classified" ? "已归档图片" : "临时图片"}</span></div><div className="preview-actions"><button onClick={() => { if (cardRef.current) onClassify(cardRef.current); }}>分类</button><button onClick={onCopy}>复制</button><button onClick={() => onRename(image)}>重命名</button>{image.status === "classified" && <button className="danger-link" onClick={() => onDelete([image.id])}>删除</button>}</div></section></div>;
+  return <div className="preview-backdrop" onMouseDown={onClose}><section ref={cardRef} className="preview-card" role="dialog" aria-modal="true" aria-label="图片预览" onMouseDown={(event) => event.stopPropagation()}><div className="preview-header"><span>快速预览</span><button className="card-more" aria-label="图片操作" aria-expanded={false} onClick={(event) => onClassify(event.currentTarget)}>⋯</button><span className="preview-zoom">{Math.round(zoom * 100)}%</span><button ref={closeRef} className="close-button" onClick={onClose} aria-label="关闭预览" title="关闭预览"><IconClose size={14} /></button></div><div ref={wrapRef} className={`preview-image-wrap ${zoom > 1 ? "zoomed" : ""}`} onWheel={onWheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={lostPointerCapture}>{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} onLoad={(event) => { const natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; naturalSizeRef.current = natural; const wrap = wrapRef.current; const nextBaseSize = fitPreviewSize(natural, wrap ? { width: wrap.clientWidth, height: wrap.clientHeight } : natural); setBaseSize(nextBaseSize); setOffset((current) => clamp(current, zoom, nextBaseSize)); }} style={{ width: `${baseSize.width}px`, height: `${baseSize.height}px`, transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} draggable={false} /> : <div className="image-missing">预览不可用</div>}</div><div className="preview-zoom-actions"><span>{Math.round(zoom * 100)}%</span><button onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>重置</button></div><div className="preview-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{image.status === "classified" ? "已归档图片" : "临时图片"}</span></div></section></div>;
 }
 
-function QuickActions({ state, selectedIds, source, anchor, showRemove, onClose, onUpdate, onError, onNotice, onCopy, onPrompt, onRename, onDelete }: { state: AppState; selectedIds: string[]; source: HTMLElement | null; anchor: PanelAnchor | null; showRemove: boolean; onClose: () => void; onUpdate: (state: AppState) => void; onError: (message: string) => void; onNotice: (message: string) => void; onCopy: (ids: string[]) => Promise<void>; onPrompt: (title: string, value?: string) => Promise<string | null>; onRename: (image: ImageRecord) => void; onDelete: (ids: string[]) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [position, setPosition] = useState<PanelAnchor | null>(anchor);
-  const copyBusyRef = useRef(false);
-  const asideRef = useRef<HTMLElement>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    setPosition(anchor);
-    if (!anchor || !asideRef.current) return;
-    const shell = asideRef.current.closest<HTMLElement>(".app-shell");
-    if (!shell) return;
-    const width = asideRef.current.offsetWidth;
-    const height = asideRef.current.offsetHeight;
-    const maxLeft = Math.max(12, shell.clientWidth - width - 12);
-    const maxTop = Math.max(12, shell.clientHeight - height - 12);
-    setPosition({
-      left: Math.round(Math.max(12, Math.min(anchor.left, maxLeft))),
-      top: Math.round(Math.max(12, Math.min(anchor.top, maxTop))),
-    });
-  }, [anchor, selectedIds.length, state.categories.length, showRemove]);
-  useLayoutEffect(() => {
-    previouslyFocusedRef.current = source ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    const first = asideRef.current?.querySelector<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
-    first?.focus();
-    return () => {
-      const origin = previouslyFocusedRef.current;
-      if (origin?.isConnected) origin.focus();
-    };
-  }, [source]);
-  useEffect(() => {
-    const focusable = () => Array.from(asideRef.current?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [])
-      .filter((element) => !element.hasAttribute("disabled"));
-    const outside = (event: PointerEvent) => {
-      if (hasBlockingDialog()) return;
-      // Right-clicking an image is an action on that image. In particular, do
-      // not let the capture-phase listener close the panel before the target's
-      // context-menu handler can preserve an existing multi-selection.
-      if (event.button !== 0) return;
-      const target = event.target as HTMLElement | null;
-      if (!asideRef.current?.contains(target as Node) && !target?.closest(".image-card, .library-card")) onClose();
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || hasBlockingDialog()) return;
-      event.preventDefault(); event.stopPropagation(); onClose();
-    };
-    const keydown = (event: KeyboardEvent) => {
-      if (hasBlockingDialog()) return;
-      if (event.key !== "Tab") return;
-      const elements = focusable();
-      if (elements.length === 0) return;
-      const first = elements[0];
-      const last = elements[elements.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("pointerdown", outside, true); document.addEventListener("keydown", escape, true); document.addEventListener("keydown", keydown, true);
-    return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); document.removeEventListener("keydown", keydown, true); };
-  }, [onClose]);
-  const selected = selectedIds.map((id) => state.images[id]).filter(Boolean);
-  const classify = async (categoryId: string) => { if (busy) return; setBusy(true); try { onUpdate(await window.imageBoard.classifyImages(selectedIds, categoryId)); onNotice("分类已保存"); onClose(); } catch (error) { onError(error instanceof Error ? error.message : "分类失败"); } finally { setBusy(false); } };
-  const createCategory = async () => { if (busy) return; const name = await onPrompt("新建分类"); if (!name) return; setBusy(true); try { onUpdate(await window.imageBoard.createCategory(name)); onNotice("分类已创建"); } catch (error) { onError(error instanceof Error ? error.message : "创建分类失败"); } finally { setBusy(false); } };
-  const remove = async () => { if (busy) return; setBusy(true); try { let next = state; for (const id of selectedIds) next = await window.imageBoard.removeImageFromCanvas(id); onUpdate(next); onClose(); } catch (error) { onError(error instanceof Error ? error.message : "移除失败"); } finally { setBusy(false); } };
-  const copy = async () => {
-    if (busy || copyBusyRef.current) return;
-    copyBusyRef.current = true;
-    setBusy(true);
-    try { await onCopy(selectedIds); }
-    finally { copyBusyRef.current = false; setBusy(false); }
-  };
-  return <aside ref={asideRef} role="dialog" aria-label="图片快捷操作" className={`quick-actions ${position ? "anchored" : ""}`} style={position ? { left: position.left, top: position.top } : undefined}><div className="quick-actions-title"><div><strong>{selectedIds.length > 1 ? `已选 ${selectedIds.length} 张图片` : "图片快捷操作"}</strong><span>{selected[0]?.status === "classified" ? "已归档图片" : "临时图片"}</span></div><button className="close-button" onClick={onClose} aria-label="关闭操作面板" title="关闭"><IconClose size={14} /></button></div><div className="category-label">选择分类{selectedIds.length > 1 ? "（批量）" : ""}</div><div className="category-grid">{state.categories.map((category) => <button key={category.id} disabled={busy} onClick={() => void classify(category.id)}>{category.name}</button>)}<button className="new-category" disabled={busy} onClick={() => void createCategory()}>＋ 新分类</button></div><div className="quick-actions-footer"><button disabled={busy} onClick={() => void copy()}>复制图片文件</button>{selected.length === 1 && <button disabled={busy} onClick={() => onRename(selected[0])}>重命名</button>}{!showRemove && selected.length > 0 && <button className="danger-link" disabled={busy} onClick={() => onDelete(selectedIds)}>删除分类图片</button>}{showRemove && <button className="danger-link" disabled={busy} onClick={() => void remove()}>从画布移除</button>}</div></aside>;
-}
 
 function Library({ state, selectedIds, onPreview, onSelect, onQuickActions, onCopy, onRename, onDelete }: { state: AppState; selectedIds: string[]; onPreview: (id: string) => void; onSelect: (event: React.MouseEvent<HTMLElement> | null, id: string, toggleSelection?: boolean) => void; onQuickActions: (event: React.MouseEvent<HTMLElement> | null, id: string) => void; onCopy: (ids: string[]) => void; onRename: (image: ImageRecord) => void; onDelete: (ids: string[]) => void }) {
   const categorized = useMemo(() => Object.values(state.images).filter((image) => image.status === "classified"), [state.images]);
   const keyboard = (event: React.KeyboardEvent<HTMLElement>, image: ImageRecord) => { if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) { event.preventDefault(); event.currentTarget.focus(); onQuickActions(null, image.id); } else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.focus(); if (event.shiftKey) onSelect(null, image.id, true); else onPreview(image.id); } };
-  return <section className="library-view"><div className="library-heading"><div><strong>分类图片库</strong><span>左键预览 · Shift 多选 · 右键快捷操作</span></div><span>{categorized.length} 张</span></div>{state.categories.map((category) => { const images = categorized.filter((image) => image.categoryId === category.id); return <div className="library-group" key={category.id}><div className="library-group-title"><strong>{category.name}</strong><span>{images.length}</span></div>{images.length > 0 && <div className="library-grid">{images.map((image) => { const selected = selectedIds.includes(image.id); return <article className={`library-card ${selected ? "selected" : ""}`} key={image.id} role="button" tabIndex={0} aria-selected={selected} aria-label={`图片 ${image.fileName}`} onKeyDown={(event) => keyboard(event, image)} onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) { if (event.shiftKey) onSelect(event, image.id, true); else onPreview(image.id); } }} onContextMenu={(event) => onQuickActions(event, image.id)}><div className="library-card-media">{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} /> : <div className="image-missing">预览不可用</div>}</div><span title={image.fileName}>{image.fileName}</span><div className="library-card-actions"><button onClick={(event) => { event.stopPropagation(); onQuickActions(event, image.id); }}>重新分类</button><button onClick={(event) => { event.stopPropagation(); onRename(image); }}>重命名</button><button onClick={(event) => { event.stopPropagation(); onCopy([image.id]); }}>复制</button><button className="danger-link" onClick={(event) => { event.stopPropagation(); onDelete([image.id]); }}>删除</button></div></article>; })}</div>}</div>})}{categorized.length === 0 && <div className="library-empty">还没有已分类图片。回到画布后右键图片分类，或先粘贴图片。</div>}</section>;
+  return <section className="library-view"><div className="library-heading"><div><strong>分类图片库</strong><span>左键预览 · Shift 多选 · 右键快捷操作</span></div><span>{categorized.length} 张</span></div>{state.categories.map((category) => { const images = categorized.filter((image) => image.categoryId === category.id); return <div className="library-group" key={category.id}><div className="library-group-title"><strong>{category.name}</strong><span>{images.length}</span></div>{images.length > 0 && <div className="library-grid">{images.map((image) => { const selected = selectedIds.includes(image.id); return <article className={`library-card ${selected ? "selected" : ""}`} key={image.id} role="button" tabIndex={0} aria-selected={selected} aria-label={`图片 ${image.fileName}`} onKeyDown={(event) => keyboard(event, image)} onClick={(event) => { if (!(event.target as HTMLElement).closest("button, .quick-actions")) { if (event.shiftKey) onSelect(event, image.id, true); else onPreview(image.id); } }} onContextMenu={(event) => onQuickActions(event, image.id)}><div className="library-card-media">{image.dataUrl ? <img src={image.dataUrl} alt={image.fileName} /> : <div className="image-missing">预览不可用</div>}</div><span title={image.fileName}>{image.fileName}</span><button className="card-more" aria-expanded={false} onPointerDown={(event) => event.stopPropagation()} aria-label={`操作 ${image.fileName}`} onClick={(event) => { event.stopPropagation(); onQuickActions(event, image.id); }}>⋯</button></article>; })}</div>}</div>})}{categorized.length === 0 && <div className="library-empty">还没有已分类图片。回到画布后右键图片分类，或先粘贴图片。</div>}</section>;
 }
 
 function Dialog({ dialog, onClose }: { dialog: DialogState; onClose: () => void }) {

@@ -116,3 +116,13 @@ test("renderer hydrates native expansion state before the first frame after relo
   assert.match(app, /useRef<PanelPhase>\(initialExpanded \? "expanded" : "collapsed"\)/);
   assert.match(app, /useRef\(initialExpanded\)/);
 });
+
+test("maximize preserves restore bounds and collapse restores first", async () => {
+  const controller = await source("src-tauri/src/window_controller.rs");
+  const toggle = branchBetween(controller, "pub fn toggle_maximized", "/// Begin the custom drag");
+  assert.ok(toggle.includes("*restore = Some(current)"));
+  assert.ok(toggle.includes("set_logical_bounds(&win, work)?"));
+  assert.ok(toggle.includes("set_logical_bounds(&win, bounds)?"));
+  const expansion = controller.slice(controller.indexOf("fn apply_expansion("));
+  assert.ok(expansion.indexOf("controller.toggle_maximized()?") < expansion.indexOf("transition_window_expansion"));
+});

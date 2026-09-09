@@ -30,6 +30,7 @@ const MAX_EMPTY_CURSOR_LOOPS: u32 = 60;
 struct Inner {
     handle: AppHandle,
     geometry: Mutex<WindowGeometryState>,
+    restore_bounds: Mutex<Option<Rect>>,
     cursor_active: AtomicBool,
     cursor_generation: AtomicU64,
     drag_active: AtomicBool,
@@ -146,6 +147,7 @@ impl WindowController {
             inner: Arc::new(Inner {
                 handle,
                 geometry: Mutex::new(window_geometry::create_window_geometry_state()),
+                restore_bounds: Mutex::new(None),
                 cursor_active: AtomicBool::new(false),
                 cursor_generation: AtomicU64::new(0),
                 drag_active: AtomicBool::new(false),
@@ -195,6 +197,53 @@ impl WindowController {
             .lock()
             .map(|state| state.expanded)
             .unwrap_or(false)
+    }
+
+    pub fn is_maximized(&self) -> bool {
+        self.inner.restore_bounds.lock().unwrap_or_else(|poison| poison.into_inner()).is_some()
+    }
+
+    pub fn toggle_maximized(&self) -> Result<bool, AppError> {
+        if !self.is_expanded() { return Ok(false); }
+        self.cancel_drag();
+        let win = main_window(&self.inner.handle)?;
+        let mut restore = self.inner.restore_bounds.lock().unwrap_or_else(|poison| poison.into_inner());
+        if let Some(bounds) = *restore {
+            set_logical_bounds(&win, bounds)?;
+            *restore = None;
+            Ok(false)
+        } else {
+            let current = logical_rect(&win)?;
+            let scale = win.scale_factor()?;
+            let work = work_area_at(&win, (current.x + current.width / 2) as f64 * scale, (current.y + current.height / 2) as f64 * scale)?;
+            set_logical_bounds(&win, work)?;
+            *restore = Some(current);
+            Ok(true)
+        }
+    }
+
+    pub fn start_titlebar_drag(&self) -> Result<(), AppError> {
+        let win = main_window(&self.inner.handle)?;
+        let mut restore = self.inner.restore_bounds.lock().unwrap_or_else(|poison| poison.into_inner());
+        if let Some(saved) = *restore {
+            let current = logical_rect(&win)?;
+            let scale = win.scale_factor()?;
+            let cursor = platform::cursor_position()?;
+            let x = cursor.0 as f64 / scale;
+            let y = cursor.1 as f64 / scale;
+            let ratio = ((x - current.x as f64) / current.width.max(1) as f64).clamp(0.0, 1.0);
+            let bounds = Rect {
+                x: (x - saved.width as f64 * ratio).round() as i32,
+                y: (y - (y - current.y as f64).clamp(0.0, 40.0)).round() as i32,
+                ..saved
+            };
+            set_logical_bounds(&win, bounds)?;
+            *restore = None;
+        }
+        drop(restore);
+        self.inner.handle.emit("window:maximized-changed", false)?;
+        win.start_dragging()?;
+        Ok(())
     }
 
     /// Begin the custom drag. Idempotent and serialized against end/cancel.
@@ -450,6 +499,9 @@ fn apply_expansion(
         .ok_or_else(|| AppError::message("窗口控制器未初始化"))?;
     eprintln!("[window] apply_expansion({expanded}, notify={notify_renderer})");
     let win = main_window(app)?;
+    if !expanded && controller.is_maximized() {
+        controller.toggle_maximized()?;
+    }
     let mut state = controller
         .inner
         .geometry

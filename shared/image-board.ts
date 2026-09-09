@@ -88,6 +88,9 @@ export interface ImageBoardApi {
   copyImageFiles(imageIds: string[]): Promise<{ copied: number }>;
   renameImage(imageId: string, name: string): Promise<AppState>;
   deleteClassifiedImages(imageIds: string[]): Promise<AppState>;
+  startTitlebarDrag(): Promise<void>;
+  toggleMaximized(): Promise<boolean>;
+  isMaximized(): Promise<boolean>;
   getExpanded(): Promise<boolean>;
   setExpanded(expanded: boolean): Promise<void>;
   closeWindow(): Promise<void>;

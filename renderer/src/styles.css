@@ -58,7 +58,7 @@ button:active:not(:disabled) { transform: scale(.96); }
 .loading-actions button.primary-button { background: var(--ink-strong); color: var(--canvas); }
 
 .collapsed-shell { position: relative; width: 88px; height: 88px; min-height: 0; display: grid; place-items: center; border: 0; background: transparent; border-radius: 50%; cursor: default; user-select: none; touch-action: none; -webkit-app-region: no-drag; }
-.collapsed-shell.dragging { -webkit-app-region: drag; cursor: grabbing; }
+.collapsed-shell.dragging { -webkit-app-region: no-drag; touch-action: none; cursor: grabbing; }
 .collapsed-shell.dragging .bloub-svg { -webkit-app-region: drag; }
 .collapsed-ball { position: relative; display: grid; place-items: center; width: 68px; height: 68px; }
 .collapsed-count { position: absolute; right: -4px; top: -3px; z-index: 4; min-width: 19px; padding: 1px 5px; border: 2px solid var(--canvas); border-radius: 9999px; background: var(--accent); color: var(--canvas); text-align: center; font-size: 10px; line-height: 14px; font-weight: 600; }
@@ -300,3 +300,32 @@ button:active:not(:disabled) { transform: scale(.96); }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
   .bloub-drag-open .bloub-core { transform: none; }
 }
+
+.selection-toolbar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--canvas); box-shadow: var(--shadow-popover); white-space: nowrap; }
+.quick-actions { z-index: 35; }
+.quick-actions-title strong { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-actions-footer { flex-wrap: wrap; gap: 8px; }
+.quick-actions input { width: 100%; margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.action-error { color: #b42318; font-size: 12px; }
+
+/* Actions belong to the card: no viewport-positioned popover or extra footer. */
+.image-card, .library-card, .preview-card { position: relative; }
+.image-card { position: absolute; }
+.card-more { position: absolute; top: 8px; right: 8px; z-index: 2; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border-radius: 6px; background: var(--canvas); color: var(--muted); font-size: 19px; line-height: 1; }
+.card-more:hover, .card-more[aria-expanded="true"] { background: var(--accent-soft); color: var(--ink); }
+/* Inline actions keep the image width and grow only with their content. */
+.image-card.actions-expanded { width: 160px; padding: 6px; min-height: 0; z-index: 5; }
+.library-card.actions-expanded { min-height: 0; }
+.preview-card.actions-expanded { width: min(440px, 100%); min-height: 0; }
+.card-actions-expanded { position: static; width: auto; max-height: none; margin: 7px -6px -6px; padding: 5px 4px; border: 0; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-card) var(--radius-card); box-shadow: none; animation: none; background: var(--canvas); overflow: visible; cursor: default; touch-action: auto; }
+.preview-card > .card-actions-expanded { margin: 8px 0 0; flex-shrink: 0; }
+.inline-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 1px; }
+.inline-action-bar button { padding: 5px 3px; font-size: 10px; line-height: 16px; color: var(--muted); border-radius: 4px; white-space: nowrap; }
+.inline-action-bar button:hover:not(:disabled), .inline-action-bar button:focus-visible { background: var(--subtle); color: var(--ink); }
+.inline-action-bar .inline-remove:hover:not(:disabled), .inline-action-bar .inline-remove:focus-visible { background: #fff1f0; color: var(--danger); }
+.inline-heading { display: flex; justify-content: space-between; align-items: center; padding: 3px; font-size: 11px; color: var(--muted); }
+.card-actions-expanded .category-grid { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; max-height: 132px; overflow-y: auto; scrollbar-width: thin; }
+.card-actions-expanded .category-grid button { padding: 4px 7px; border-radius: 5px; font-size: 11px; }
+.card-actions-expanded .category-grid button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.card-actions-expanded input { margin-top: 0; padding: 5px; min-width: 0; font-size: 11px; }
+.preview-header .card-more { position: static; margin-left: auto; }

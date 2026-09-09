@@ -280,3 +280,18 @@ pub fn end_window_drag(window: State<'_, WindowController>) -> Result<(), AppErr
     window.end_window_drag();
     Ok(())
 }
+
+#[tauri::command]
+pub fn toggle_maximized(window: State<'_, WindowController>) -> Result<bool, AppError> {
+    window.toggle_maximized()
+}
+
+#[tauri::command]
+pub fn is_maximized(window: State<'_, WindowController>) -> bool {
+    window.is_maximized()
+}
+
+#[tauri::command]
+pub fn start_titlebar_drag(window: State<'_, WindowController>) -> Result<(), AppError> {
+    window.start_titlebar_drag()
+}

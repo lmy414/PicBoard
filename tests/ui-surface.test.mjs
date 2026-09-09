@@ -69,10 +69,8 @@ test("canvas authorization iteration keeps image intent and keyboard guards expl
   assert.match(app, /setSelectedIds\(\[\]\)/);
   assert.match(app, /const selectImage = .*toggleSelection/);
   assert.match(app, /onSelect\(null, image\.id, true\)/);
-  const reclassifyHandler = app.match(/<button onClick=\{\(event\) => \{ event\.stopPropagation\(\); ([^}]*) \}\}>重新分类<\/button>/);
-  assert.ok(reclassifyHandler, "Library reclassify action should have a dedicated click handler");
-  assert.match(reclassifyHandler[1], /onQuickActions\(event, image\.id\)/);
-  assert.doesNotMatch(reclassifyHandler[1], /onSelect/);
+  assert.match(app, /onQuickActions\(event, image.id\)/);
+  assert.match(app, /className="card-more"/);
   assert.match(app, /if \(event\.shiftKey\) onSelect\(event, image\.id, true\); else onPreview\(image\.id\)/);
   assert.match(app, /selectedIds: string\[\]/);
   assert.match(app, /aria-selected=\{selected\}/);
@@ -101,4 +99,18 @@ test("canvas authorization iteration keeps image intent and keyboard guards expl
   assert.match(css, /prefers-reduced-motion/);
   assert.match(ball, /dragOpen/);
   assert.match(ball, /bloub-drag-open/);
+});
+
+test("canvas cards keep right-click actions without a more button", async () => {
+  const app = await readFile(new URL("../renderer/src/App.tsx", import.meta.url), "utf8");
+  const canvas = app.slice(app.indexOf("function CanvasImage("), app.indexOf("function QuickPreview("));
+  assert.doesNotMatch(canvas, /className="card-more"/);
+  assert.match(canvas, /onContextMenu=\{contextMenu\}/);
+});
+
+test("canvas preview retains remove while library retains recycle", async () => {
+  const app = await readFile(new URL("../renderer/src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /viewMode === "canvas" && <QuickActions.*showRemove=\{true\}/);
+  assert.match(app, /viewMode === "library" && <QuickActions.*showRemove=\{false\}/);
+  assert.doesNotMatch(app, /showRemove=\{!previewId\}/);
 });

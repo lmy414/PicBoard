@@ -1491,9 +1491,25 @@ fn replace_state_file(
 }
 
 #[cfg(windows)]
-fn recycle_windows(path: &Path) -> Result<(), AppError> {
-    use std::iter::once;
+fn shell_parsing_path(path: &Path) -> Result<Vec<u16>, AppError> {
     use std::os::windows::ffi::OsStrExt;
+    if !path.is_absolute() {
+        return Err(AppError::message("Shell 文件路径必须是绝对路径"));
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if wide.contains(&0) {
+        return Err(AppError::message("Shell 文件路径包含空字符"));
+    }
+    // Shell parsing rejects forward slashes even though Win32 file I/O accepts them.
+    Ok(wide
+        .into_iter()
+        .map(|unit| if unit == b'/' as u16 { 0x5c } else { unit })
+        .chain(std::iter::once(0))
+        .collect())
+}
+
+#[cfg(windows)]
+fn recycle_windows(path: &Path) -> Result<(), AppError> {
     use std::thread;
     use windows::core::PCWSTR;
     use windows::Win32::System::Com::{
@@ -1515,11 +1531,7 @@ fn recycle_windows(path: &Path) -> Result<(), AppError> {
                 )));
             }
             let result = (|| {
-                let wide = path
-                    .as_os_str()
-                    .encode_wide()
-                    .chain(once(0))
-                    .collect::<Vec<_>>();
+                let wide = shell_parsing_path(&path)?;
                 let item = unsafe {
                     SHCreateItemFromParsingName::<_, _, windows::Win32::UI::Shell::IShellItem>(
                         PCWSTR(wide.as_ptr()),
@@ -1574,6 +1586,49 @@ fn recycle_windows(path: &Path) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_item_accepts_storage_paths_with_forward_slashes() {
+        use windows::core::PCWSTR;
+        use windows::Win32::System::Com::{
+            CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::UI::Shell::{IShellItem, SHCreateItemFromParsingName};
+        let root = std::env::temp_dir().join(format!("picboard-shell-{}", uuid::Uuid::new_v4()));
+        let folder = root.join("classified").join("分类 空格");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("测试 图片.png");
+        std::fs::write(&file, b"shell parsing only").unwrap();
+        let path = crate::paths::safe_join(&root, "classified/分类 空格/测试 图片.png").unwrap();
+        let wide = shell_parsing_path(&path).unwrap();
+        let result = std::thread::spawn(move || {
+            unsafe {
+                CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().unwrap();
+            }
+            let result = unsafe {
+                SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), None)
+            };
+            let status = result
+                .as_ref()
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+            drop(result);
+            unsafe {
+                CoUninitialize();
+            }
+            status
+        })
+        .join()
+        .unwrap();
+        assert!(
+            file.exists(),
+            "Shell item creation must not delete the test file"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(result.is_ok(), "Shell item creation failed: {result:?}");
+    }
+
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
