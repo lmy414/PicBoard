@@ -20,13 +20,24 @@
     "build:renderer": "vite build",
     "build": "npm run build:renderer",
     "typecheck": "tsc --noEmit",
-    "test:node": "node --test tests/ui-surface.test.mjs tests/shared-boundary.test.mjs tests/shared-geometry.test.mjs tests/native-boundary.test.mjs",
+    "test:node": "node --test tests/*.test.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test": "npm run test:node && npm run test:components && npm run test:rust",
-    "test:components": "vitest run tests/image-actions.test.tsx"
+    "test:components": "vitest run"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
     "@tauri-apps/api": "^2.11.1",
+    "@tiptap/core": "^3.32.2",
+    "@tiptap/extension-image": "^3.32.2",
+    "@tiptap/extension-placeholder": "^3.32.2",
+    "@tiptap/extension-table": "^3.32.2",
+    "@tiptap/extension-task-item": "^3.32.2",
+    "@tiptap/extension-task-list": "^3.32.2",
+    "@tiptap/pm": "^3.32.2",
+    "@tiptap/react": "^3.32.2",
+    "@tiptap/starter-kit": "^3.32.2",
+    "@tiptap/suggestion": "^3.32.2",
     "@vitejs/plugin-react": "^4.3.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

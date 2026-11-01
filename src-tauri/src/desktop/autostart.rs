@@ -191,7 +191,7 @@ impl AutoStartManager {
             return false;
         };
         match sys::read_command() {
-            Ok(Some(command)) => command == *own,
+            Ok(Some(command)) => command == quoted_autostart_command(own),
             Ok(None) => false,
             Err(error) => {
                 eprintln!("[autostart] read failed: {error}");
@@ -215,7 +215,7 @@ impl AutoStartManager {
             sys::set_command(&quoted)?;
             // Read back to prove the real value before reporting success.
             match sys::read_command()? {
-                Some(current) if current == *own => Ok(()),
+                Some(current) if current == quoted_autostart_command(own) => Ok(()),
                 Some(_) => Err(AppError::message("系统启动项写入后读回不一致")),
                 None => Err(AppError::message("系统启动项写入后未读回值")),
             }
@@ -229,12 +229,23 @@ impl AutoStartManager {
     }
 }
 
+/// Marker argument that makes an auto-start launch stay in the tray.
+pub(crate) const AUTOSTART_FLAG: &str = "--autostart";
+
 /// Launch command quoted for the shell (a path with spaces must be quoted).
+/// The auto-start launch receives [`AUTOSTART_FLAG`] so the host starts
+/// silently in the tray instead of showing the main window.
 fn quote_command(exe: &Path) -> String {
     let raw = exe.to_string_lossy();
-    if raw.starts_with('"') && raw.ends_with('"') {
+    let quoted = if raw.starts_with('"') && raw.ends_with('"') {
         raw.into_owned()
     } else {
         format!("\"{raw}\"")
-    }
+    };
+    format!("{quoted} {AUTOSTART_FLAG}")
+}
+
+/// The registry command this installation owns (without the flag).
+fn quoted_autostart_command(exe: &Path) -> String {
+    quote_command(exe)
 }

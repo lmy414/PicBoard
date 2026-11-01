@@ -1,0 +1,279 @@
+/*!
+ * Plugin settings section (lane P). Every selector is plg- prefixed so this
+ * file cannot collide with global styles.css. Design tokens
+ * (--surface-*/--text/--accent/--elev-*/--radius-*) come from the app-wide
+ * theme token blocks in renderer/src/styles.css.
+ */
+
+.plg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plg-reload {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-radius: var(--radius-s);
+  background: var(--surface-panel);
+  box-shadow: var(--elev-1);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.plg-reload:hover:not(:disabled) {
+  box-shadow: var(--elev-hover);
+  color: var(--accent-ink);
+}
+
+.plg-reload:active:not(:disabled) {
+  background: var(--surface-press-fill); box-shadow: var(--elev-inset-sm);
+}
+
+.plg-directory {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.plg-directory span {
+  flex: 0 0 auto;
+}
+
+.plg-directory code {
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+  background: var(--surface-input);
+  box-shadow: var(--elev-inset-sm);
+  color: var(--text);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.plg-error {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-s);
+  background: var(--danger-soft);
+  box-shadow: var(--elev-inset-sm);
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.plg-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.plg-errors li {
+  display: flex;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-s);
+  background: var(--warning-soft);
+  box-shadow: var(--elev-inset-sm);
+}
+
+.plg-errors code {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+
+.plg-empty {
+  padding: 12px;
+  border-radius: var(--radius-m);
+  background: var(--surface-sunken);
+  box-shadow: var(--elev-inset);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.plg-empty p {
+  margin: 0;
+}
+
+.plg-empty p + p {
+  margin-top: 4px;
+}
+
+.plg-list,
+.plg-processors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plg-item {
+  padding: 10px;
+  border-radius: var(--radius-m);
+  background: var(--surface-panel);
+  box-shadow: var(--elev-1);
+}
+
+.plg-item-error {
+  box-shadow: var(--elev-1), 0 0 0 1.5px var(--danger);
+}
+
+.plg-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plg-item-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plg-version {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.plg-status {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: var(--surface-sunken);
+  box-shadow: var(--elev-inset-sm);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.plg-status-ready {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.plg-status-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.plg-folder {
+  margin: 4px 0 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.plg-item .plg-error {
+  margin-top: 8px;
+}
+
+.plg-processors {
+  margin-top: 10px;
+}
+
+.plg-processor {
+  padding: 8px 9px;
+  border-radius: var(--radius-m);
+  background: transparent;
+  box-shadow: var(--elev-inset-sm);
+}
+
+.plg-processor-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plg-processor-head strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plg-processor-head code {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plg-processor-note {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.plg-processor-ports {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.plg-ports {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.plg-ports-label {
+  flex: 0 0 30px;
+  color: var(--text-muted);
+}
+
+.plg-ports-empty {
+  color: var(--text-faint);
+}
+
+.plg-port {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: var(--surface-sunken);
+  box-shadow: var(--elev-inset-sm);
+  color: var(--text);
+}
+
+.plg-port small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.plg-port-text {
+  background: var(--accent-soft);
+}
+
+.plg-port-link {
+  background: var(--success-soft);
+}
+
+.plg-port-image {
+  background: var(--warning-soft);
+}

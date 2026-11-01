@@ -1,178 +1,143 @@
 //! Tauri host adapter: implements the `window.imageBoard` shape (see
 //! `shared/image-board.ts`) on top of `@tauri-apps/api` core/event.
 //!
-//! - Command/argument/return naming is 1:1 with the Rust commands.
+//! - Command names and argument keys are 1:1 with the Rust commands: calls use
+//!   snake_case commands and camelCase argument keys, as required by Tauri.
 //! - `Uint8Array` payloads are passed through as-is; Tauri's IPC serializer
 //!   converts them to byte arrays on the wire and Rust receives `Vec<u8>`.
 //! - Event registration is asynchronous (`listen` returns a Promise), but the
-//!   public `onCursorPosition` must return a synchronous unsubscribe function,
-//!   so the adapter bridges an async `ready` promise to a sync API. The
-//!   listener set is created once; each call site gets its own unsubscribe.
+//!   public subscriptions must return a synchronous unsubscribe function, so
+//!   one bridge adapts every host event.
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AppState,
+  CanvasFrame,
+  CanvasPoint,
   CanvasViewport,
-  CloseBehavior,
-  CursorPosition,
+  ContentAsset,
+  ContentBody,
   DesktopSettings,
+  DesktopSettingsPatch,
   ImageBoardApi,
   ImportImagePayload,
   ImportViewport,
+  MainNavigation,
+  NodeMove,
+  PluginListing,
 } from "../../../shared/image-board";
 
 function toError(caught: unknown): Error {
   if (caught instanceof Error) return caught;
-  const message = typeof caught === "string" ? caught : "host 调用失败";
-  return new Error(message);
+  return new Error(typeof caught === "string" ? caught : "host 调用失败");
 }
 
-/** Tauri command names mirror the Rust `#[tauri::command]` fns. */
-function commandName(tsName: string): string {
-  const map: Record<string, string> = {
-    loadState: "load_state",
-    importImages: "import_images",
-    pasteImage: "paste_image",
-    setActiveCanvas: "set_active_canvas",
-    setCanvasViewport: "set_canvas_viewport",
-    createCanvas: "create_canvas",
-    renameCanvas: "rename_canvas",
-    deleteCanvas: "delete_canvas",
-    createCategory: "create_category",
-    classifyImages: "classify_images",
-    removeImageFromCanvas: "remove_image_from_canvas",
-    moveImage: "move_image",
-    copyImageFiles: "copy_image_files",
-    renameImage: "rename_image",
-    deleteClassifiedImages: "delete_classified_images",
-    getExpanded: "get_expanded",
-    startTitlebarDrag: "start_titlebar_drag",
-    toggleMaximized: "toggle_maximized",
-    isMaximized: "is_maximized",
-    setExpanded: "set_expanded",
-    closeWindow: "close_window",
-    startWindowDrag: "start_window_drag",
-    endWindowDrag: "end_window_drag",
-    getDesktopSettings: "get_desktop_settings",
-    setDesktopSettings: "set_desktop_settings",
-    pickDirectory: "pick_directory",
-  };
-  return map[tsName] ?? tsName;
-}
-
-async function call<T>(tsName: string, args?: Record<string, unknown>): Promise<T> {
+async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
-    return await invoke<T>(commandName(tsName), args);
+    return await invoke<T>(command, args);
   } catch (caught) {
     throw toError(caught);
   }
 }
 
-export function createTauriAdapter(): ImageBoardApi {
-  const api: ImageBoardApi = {
-    loadState: () => call<AppState>("loadState"),
-    importImages: (canvasId: string, images: ImportImagePayload[], viewport?: ImportViewport) =>
-      call<AppState>("importImages", { canvasId, images, viewport }),
-    pasteImage: (canvasId: string) =>
-      call<{ state: AppState; imported: boolean }>("pasteImage", { canvasId }),
-    setActiveCanvas: (canvasId: string) => call<AppState>("setActiveCanvas", { canvasId }),
-    setCanvasViewport: (canvasId: string, viewport: CanvasViewport) =>
-      call<AppState>("setCanvasViewport", { canvasId, viewport }),
-    createCanvas: () => call<AppState>("createCanvas"),
-    renameCanvas: (canvasId: string, name: string) =>
-      call<AppState>("renameCanvas", { canvasId, name }),
-    deleteCanvas: (canvasId: string) => call<AppState>("deleteCanvas", { canvasId }),
-    createCategory: (name: string) => call<AppState>("createCategory", { name }),
-    classifyImages: (imageIds: string[], categoryId: string) =>
-      call<AppState>("classifyImages", { imageIds, categoryId }),
-    removeImageFromCanvas: (imageId: string) =>
-      call<AppState>("removeImageFromCanvas", { imageId }),
-    moveImage: (imageId: string, x: number, y: number) =>
-      call<AppState>("moveImage", { imageId, x, y }),
-    copyImageFiles: (imageIds: string[]) =>
-      call<{ copied: number }>("copyImageFiles", { imageIds }),
-    // Native commands are supplied by the follow-up storage task.
-    renameImage: (imageId: string, name: string) =>
-      call<AppState>("renameImage", { imageId, name }),
-    deleteClassifiedImages: (imageIds: string[]) =>
-      call<AppState>("deleteClassifiedImages", { imageIds }),
-    getExpanded: () => call<boolean>("getExpanded"),
-    startTitlebarDrag: () => call<void>("startTitlebarDrag"),
-    toggleMaximized: () => call<boolean>("toggleMaximized"),
-    isMaximized: () => call<boolean>("isMaximized"),
-    setExpanded: (expanded: boolean) => call<void>("setExpanded", { expanded }),
-    closeWindow: () => call<void>("closeWindow"),
-    startWindowDrag: () => call<void>("startWindowDrag"),
-    endWindowDrag: () => call<void>("endWindowDrag"),
-    getDesktopSettings: () => call<DesktopSettings>("getDesktopSettings"),
-    setDesktopSettings: (patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }) =>
-      call<DesktopSettings>("setDesktopSettings", { patch }),
-    pickDirectory: (initialPath?: string) =>
-      call<string | null>("pickDirectory", { initialPath }),
-    onCursorPosition: (listener: (position: CursorPosition) => void) => {
-      // Event plumbing is async; the unsubscribe is synchronous once ready.
-      let unlisten: (() => void) | undefined;
-      let disposed = false;
-      const ready = listen<CursorPosition>("window:cursor-position", (event) => {
-        listener(event.payload);
-      }).then((fn) => {
-        if (disposed) {
-          void fn();
-        } else {
-          unlisten = fn;
-        }
-      }).catch((caught) => {
-        console.error("cursor event subscription failed", caught);
-      });
-      return () => {
-        disposed = true;
-        if (unlisten) {
-          unlisten();
-          unlisten = undefined;
-        } else {
-          // Unsubscribed before the async listen resolved; drop it when ready.
-          void ready.then(() => {
-            if (unlisten) {
-              unlisten();
-              unlisten = undefined;
-            }
-          });
-        }
-      };
-    },
-    onExpandedChange: (listener: (expanded: boolean) => void) => {
-      // Host/tray/close actions emit `window:expanded-changed`; React listens
-      // and never re-invokes, so no recursion. Same async-bridge pattern as
-      // the cursor subscription above.
-      let unlisten: (() => void) | undefined;
-      let disposed = false;
-      const ready = listen<boolean>("window:expanded-changed", (event) => {
-        listener(event.payload);
-      }).then((fn) => {
-        if (disposed) {
-          void fn();
-        } else {
-          unlisten = fn;
-        }
-      }).catch((caught) => {
-        console.error("expanded event subscription failed", caught);
-      });
-      return () => {
-        disposed = true;
-        if (unlisten) {
-          unlisten();
-          unlisten = undefined;
-        } else {
-          void ready.then(() => {
-            if (unlisten) {
-              unlisten();
-              unlisten = undefined;
-            }
-          });
-        }
-      };
-    },
+/** Bridge the async `listen` promise to the synchronous unsubscribe of the API. */
+function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
+  let unlisten: (() => void) | undefined;
+  let disposed = false;
+  const ready = listen<T>(event, (message) => listener(message.payload))
+    .then((fn) => {
+      if (disposed) void fn();
+      else unlisten = fn;
+    })
+    .catch((caught) => {
+      console.error(`${event} subscription failed`, caught);
+    });
+  return () => {
+    disposed = true;
+    if (unlisten) {
+      unlisten();
+      unlisten = undefined;
+      return;
+    }
+    // Unsubscribed before the async listen resolved; drop it when ready.
+    void ready.then(() => {
+      if (unlisten) {
+        unlisten();
+        unlisten = undefined;
+      }
+    });
   };
-  return api;
+}
+
+export function createTauriAdapter(): ImageBoardApi {
+  return {
+    loadState: () => call<AppState>("load_state"),
+    onStateChanged: (listener) => subscribe<AppState>("state-changed", listener),
+    pasteClipboard: (canvasId: string, viewport?: ImportViewport) =>
+      call<{ state: AppState; placed: boolean }>("paste_clipboard", { canvasId, viewport }),
+    placeContent: (contentId: string, canvasId: string, center: CanvasPoint) =>
+      call<AppState>("place_content", { contentId, canvasId, center }),
+    setActiveCanvas: (canvasId: string) => call<AppState>("set_active_canvas", { canvasId }),
+    setCanvasViewport: (canvasId: string, viewport: CanvasViewport) =>
+      call<AppState>("set_canvas_viewport", { canvasId, viewport }),
+    createCanvas: (parentId?: string | null, frame?: CanvasFrame) =>
+      call<AppState>("create_canvas", { parentId: parentId ?? null, frame }),
+    moveCanvas: (canvasId: string, parentId: string | null, index?: number) =>
+      call<AppState>("move_canvas", { canvasId, parentId, index }),
+    setCanvasFrame: (canvasId: string, frame: CanvasFrame) =>
+      call<AppState>("set_canvas_frame", { canvasId, frame }),
+    groupNodesIntoCanvas: (nodeIds: string[]) =>
+      call<AppState>("group_nodes_into_canvas", { nodeIds }),
+    ungroupCanvas: (canvasId: string) => call<AppState>("ungroup_canvas", { canvasId }),
+    moveNodesToCanvas: (nodeIds: string[], targetCanvasId: string, origin: CanvasPoint) =>
+      call<AppState>("move_nodes_to_canvas", { nodeIds, targetCanvasId, origin }),
+    renameCanvas: (canvasId: string, name: string) =>
+      call<AppState>("rename_canvas", { canvasId, name }),
+    deleteCanvas: (canvasId: string) => call<AppState>("delete_canvas", { canvasId }),
+    moveNodes: (moves: NodeMove[]) => call<AppState>("move_nodes", { moves }),
+    removeNodes: (nodeIds: string[]) => call<AppState>("remove_nodes", { nodeIds }),
+    createEdge: (fromNodeId: string, toNodeId: string) =>
+      call<AppState>("create_edge", { fromNodeId, toNodeId }),
+    deleteEdges: (edgeIds: string[]) => call<AppState>("delete_edges", { edgeIds }),
+    getContentBody: (contentId: string) =>
+      call<ContentBody>("get_content_body", { contentId }),
+    updateTextContent: (contentId: string, body: ContentBody) =>
+      call<AppState>("update_text_content", { contentId, body }),
+    addContentAsset: (contentId: string, image: ImportImagePayload) =>
+      call<ContentAsset>("add_content_asset", { contentId, image }),
+    assetUrl: (contentId: string, assetId: string, variant: "thumb" | "full") =>
+      convertFileSrc(`${variant === "thumb" ? "asset-thumb" : "asset"}/${contentId}/${assetId}`, "picboard"),
+    updateLinkContent: (contentId: string, url: string) =>
+      call<AppState>("update_link_content", { contentId, url }),
+    renameImage: (contentId: string, name: string) =>
+      call<AppState>("rename_image", { contentId, name }),
+    deleteContents: (contentIds: string[]) =>
+      call<AppState>("delete_contents", { contentIds }),
+    copyContents: (contentIds: string[]) =>
+      call<{ copied: number }>("copy_contents", { contentIds }),
+    createCategory: (name: string) => call<AppState>("create_category", { name }),
+    classifyContents: (contentIds: string[], categoryId: string | null) =>
+      call<AppState>("classify_contents", { contentIds, categoryId }),
+    imageUrl: (contentId: string, variant: "thumb" | "full") =>
+      convertFileSrc(`${variant}/${contentId}`, "picboard"),
+    openExternalUrl: (url: string) => call<void>("open_external_url", { url }),
+    listPlugins: () => call<PluginListing>("list_plugins"),
+    startTitlebarDrag: () => call<void>("start_titlebar_drag"),
+    toggleMaximized: () => call<boolean>("toggle_maximized"),
+    isMaximized: () => call<boolean>("is_maximized"),
+    closeWindow: () => call<void>("close_window"),
+    minimizeWindow: () => call<void>("minimize_window"),
+    quitApp: () => call<void>("quit_app"),
+    showMainWindow: (navigate?: MainNavigation) =>
+      call<void>("show_main_window", { navigate: navigate ?? null }),
+    hideTrayPanel: () => call<void>("hide_tray_panel"),
+    getDesktopSettings: () => call<DesktopSettings>("get_desktop_settings"),
+    setDesktopSettings: (patch: DesktopSettingsPatch) =>
+      call<DesktopSettings>("set_desktop_settings", { patch }),
+    pickDirectory: (initialPath?: string) =>
+      call<string | null>("pick_directory", { initialPath }),
+    onNavigate: (listener: (navigate: MainNavigation) => void) =>
+      subscribe<MainNavigation>("main:navigate", listener),
+  };
 }

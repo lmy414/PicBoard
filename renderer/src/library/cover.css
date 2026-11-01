@@ -1,0 +1,49 @@
+/* Cover thumbnails shared by library cards and history rows. */
+.content-cover {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--surface-sunken);
+  box-shadow: var(--elev-inset-sm);
+}
+
+.content-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--motion-base, 200ms) var(--motion-ease-out, cubic-bezier(.2, .7, .3, 1));
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.content-cover.is-loaded img { opacity: 1; }
+.content-cover.is-failed img { visibility: hidden; }
+
+.content-cover-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, var(--surface-app) 28%, var(--surface-sunken) 46%, var(--surface-app) 64%);
+  background-size: 260% 100%;
+  animation: content-cover-shimmer 1.4s ease-in-out infinite;
+  transition: opacity var(--motion-base, 200ms) var(--motion-ease-out, cubic-bezier(.2, .7, .3, 1));
+}
+.content-cover.is-loaded .content-cover-shimmer,
+.content-cover.is-failed .content-cover-shimmer { opacity: 0; animation: none; }
+
+@keyframes content-cover-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -40% 0; }
+}
+
+.content-cover-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+}

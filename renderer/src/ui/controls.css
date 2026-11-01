@@ -1,8 +1,8 @@
 /*!
  * Custom controls styling (controls lane). Every selector is qib- prefixed so
  * this file cannot collide with global styles.css owned by the ui lane. Design
- * tokens (--canvas/--surface/--ink/--border/--accent/--radius-*) are read from
- * the app-wide :root tokens defined in renderer/src/styles.css.
+ * tokens (--surface-*/--text/--line/--edge/--elev-*/--accent/--radius-*) are
+ * read from the app-wide theme token blocks in renderer/src/styles.css.
  */
 
 /* ---------- Shared popover layer & panel ---------- */
@@ -17,11 +17,11 @@
   pointer-events: auto;
   box-sizing: border-box;
   padding: 8px;
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-panel, 16px);
-  background: var(--canvas, #ffffff);
-  box-shadow: 0 8px 24px rgba(20, 28, 22, 0.12), 0 16px 40px -12px rgba(15, 15, 15, 0.2);
-  color: var(--ink, #000000);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-panel);
+  box-shadow: var(--elev-3);
+  color: var(--text);
   font-size: 11px;
   animation: qib-pop-in 0.16s ease-out both;
   outline: none;
@@ -32,7 +32,7 @@
 }
 
 .qib-popover:focus {
-  border-color: var(--accent, #10a37f);
+  border-color: var(--accent);
 }
 
 @keyframes qib-pop-in {
@@ -58,7 +58,7 @@
   min-height: 34px;
   padding: 5px 9px;
   border-radius: 9px;
-  color: var(--ink, #000000);
+  color: var(--text);
   font-size: 12px;
   line-height: 18px;
   cursor: pointer;
@@ -68,11 +68,11 @@
 
 .qib-option:hover,
 .qib-option.qib-highlight {
-  background: var(--muted-surface, #f5f5f5);
+  background: var(--surface-hover);
 }
 
 .qib-option:active {
-  background: #ececec;
+  background: var(--surface-pressed);
 }
 
 .qib-option + .qib-option {
@@ -84,7 +84,7 @@
   width: 14px;
   height: 14px;
   margin-left: auto;
-  color: var(--accent, #10a37f);
+  color: var(--accent-ink);
   font-size: 13px;
   line-height: 14px;
   text-align: center;
@@ -105,10 +105,10 @@
   width: 100%;
   min-height: 32px;
   padding: 6px 9px;
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-sm, 8px);
-  background: var(--surface, #fafafa);
-  color: var(--ink, #000000);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-panel);
+  color: var(--text);
   font: inherit;
   font-size: 12px;
   line-height: 18px;
@@ -117,14 +117,14 @@
 }
 
 .qib-select-trigger[aria-expanded="true"] {
-  border-color: var(--accent, #10a37f);
+  border-color: var(--accent);
 }
 
 .qib-arrow {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
   transition: transform 0.15s ease;
 }
 
@@ -139,7 +139,7 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -147,7 +147,7 @@
   display: block;
   font-size: 10px;
   line-height: 14px;
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
 }
 
 .qib-control {
@@ -175,7 +175,7 @@
 .qib-color-hex {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--ink, #000000);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.2px;
 }
@@ -199,7 +199,7 @@
 }
 
 .qib-sv-panel:focus-visible {
-  box-shadow: 0 0 0 2px var(--canvas, #ffffff), 0 0 0 4px var(--accent, #10a37f);
+  box-shadow: var(--focus-ring);
 }
 
 .qib-sv-dot {
@@ -209,7 +209,7 @@
   height: 13px;
   margin: -7px 0 0 -7px;
   border-radius: 50%;
-  border: 2px solid var(--canvas, #ffffff);
+  border: 2px solid var(--surface-panel);
   background: transparent;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
   pointer-events: none;
@@ -249,7 +249,7 @@
   height: 14px;
   margin-left: -7px;
   border-radius: 50%;
-  border: 2px solid var(--canvas, #ffffff);
+  border: 2px solid var(--surface-panel);
   background: transparent;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
   pointer-events: none;
@@ -278,10 +278,10 @@
   min-width: 0;
   min-height: 28px;
   padding: 4px 8px;
-  border: 1px solid var(--border, #e5e5e5);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface, #fafafa);
-  color: var(--ink, #000000);
+  background: var(--surface-panel);
+  color: var(--text);
   font: inherit;
   font-size: 12px;
   letter-spacing: 0.3px;
@@ -289,16 +289,16 @@
 }
 
 .qib-hex-input:focus {
-  border-color: var(--accent, #10a37f);
+  border-color: var(--accent);
 }
 
 .qib-hex-input.qib-invalid {
-  border-color: var(--danger, #c83f4d);
+  border-color: var(--danger);
 }
 
 .qib-hex-error {
   display: none;
-  color: var(--danger, #c83f4d);
+  color: var(--danger);
   font-size: 10px;
   line-height: 14px;
   text-align: right;
@@ -325,7 +325,7 @@
   gap: 6px;
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid var(--border, #e5e5e5);
+  border-top: 1px solid var(--line);
 }
 
 .qib-preset-swatch {
@@ -341,12 +341,12 @@
 
 .qib-preset-swatch:hover,
 .qib-preset-swatch:focus-visible {
-  box-shadow: 0 0 0 2px var(--canvas, #ffffff), 0 0 0 4px var(--accent, #10a37f);
+  box-shadow: var(--focus-ring);
   outline: none;
 }
 
 .qib-preset-swatch.qib-selected {
-  box-shadow: 0 0 0 2px var(--canvas, #ffffff), 0 0 0 3px var(--accent, #10a37f), 0 0 0 4px rgba(16, 163, 127, 0.25);
+  box-shadow: var(--focus-ring), var(--accent-glow);
 }
 
 /* ---------- DirectoryField ---------- */
@@ -364,10 +364,10 @@
   min-width: 0;
   min-height: 32px;
   padding: 6px 9px;
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-sm, 8px);
-  background: var(--surface, #fafafa);
-  color: var(--ink, #000000);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-panel);
+  color: var(--text);
   font: inherit;
   font-size: 11px;
   line-height: 18px;
@@ -375,11 +375,11 @@
 }
 
 .qib-path-input:focus {
-  border-color: var(--accent, #10a37f);
+  border-color: var(--accent);
 }
 
 .qib-path-input.qib-invalid {
-  border-color: var(--danger, #c83f4d);
+  border-color: var(--danger);
 }
 
 .qib-pick-button {
@@ -388,14 +388,14 @@
   min-height: 32px;
   padding: 5px 10px;
   border-radius: 9999px;
-  background: var(--ink, #000000);
-  color: var(--canvas, #ffffff);
+  background: var(--text);
+  color: var(--surface-panel);
   font-size: 11px;
   line-height: 18px;
 }
 
 .qib-pick-button:hover {
-  background: var(--accent, #10a37f);
+  background: var(--accent);
 }
 
 .qib-pick-button:disabled {
@@ -409,7 +409,7 @@
   gap: 5px;
   min-width: 0;
   margin-top: 5px;
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
   font-size: 10px;
   line-height: 14px;
 }
@@ -419,11 +419,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink, #000000);
+  color: var(--text);
 }
 
 .qib-directory-status.qib-error {
-  color: var(--danger, #c83f4d);
+  color: var(--danger);
 }
 
 /* ---------- ShellSettings ---------- */
@@ -434,7 +434,7 @@
   gap: 12px;
   margin-top: 15px;
   padding-top: 13px;
-  border-top: 1px solid var(--border, #e5e5e5);
+  border-top: 1px solid var(--line);
 }
 
 .qib-shell-settings[hidden] {
@@ -445,7 +445,7 @@
   display: block;
   font-size: 10px;
   line-height: 14px;
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
   margin-bottom: 6px;
 }
 
@@ -460,10 +460,10 @@
   position: relative;
   min-height: 36px;
   padding: 7px 8px 6px;
-  border: 1px solid var(--border, #e5e5e5);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--surface, #fafafa);
-  color: var(--ink, #202421);
+  background: var(--surface-panel);
+  color: var(--text);
   font: inherit;
   font-size: 11px;
   line-height: 16px;
@@ -478,7 +478,7 @@
 }
 
 .qib-choice small {
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
   font-size: 9px;
   line-height: 12px;
 }
@@ -498,8 +498,8 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--accent, #23856b);
-  color: var(--canvas, #ffffff);
+  background: var(--accent);
+  color: var(--surface-panel);
   font-size: 9px;
   line-height: 1;
 }
@@ -509,15 +509,15 @@
 }
 
 .qib-choice:hover {
-  border-color: var(--accent, #23856b);
-  background: var(--surface, #ffffff);
+  border-color: var(--accent);
+  background: var(--surface-hover);
 }
 
 .qib-choice[aria-checked="true"] {
-  border-color: var(--accent, #23856b);
-  background: rgba(35, 133, 107, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(35, 133, 107, 0.18);
-  color: var(--ink, #202421);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--focus-ring);
+  color: var(--text);
   font-weight: 500;
 }
 
@@ -536,14 +536,14 @@
 .qib-hex-input:focus-visible,
 .qib-option:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--canvas, #ffffff), 0 0 0 4px rgba(16, 163, 127, 0.55);
+  box-shadow: var(--focus-ring);
 }
 
 .qib-toggle-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  color: var(--ink, #000000);
+  color: var(--text);
   font-size: 11px;
   cursor: pointer;
 }
@@ -565,7 +565,7 @@
   height: 18px;
   margin-top: 1px;
   border-radius: 9999px;
-  background: #d6d6d6;
+  background: var(--line-strong);
   transition: background-color 0.16s ease;
 }
 
@@ -577,13 +577,13 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--canvas, #ffffff);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  background: var(--surface-panel);
+  box-shadow: 0 1px 2px rgba(15, 15, 15, .18);
   transition: transform 0.16s ease;
 }
 
 .qib-toggle-row input:checked + .qib-switch {
-  background: var(--accent, #10a37f);
+  background: var(--accent);
 }
 
 .qib-toggle-row input:checked + .qib-switch::after {
@@ -607,19 +607,19 @@
 }
 
 .qib-toggle-copy small {
-  color: var(--muted, rgba(0, 0, 0, 0.58));
+  color: var(--text-muted);
   font-size: 10px;
   line-height: 15px;
 }
 
 .qib-shell-error {
-  color: var(--danger, #c83f4d);
+  color: var(--danger);
   font-size: 10px;
   line-height: 15px;
 }
 
 .qib-shell-note {
-  color: var(--faint, rgba(0, 0, 0, 0.38));
+  color: var(--text-faint);
   font-size: 9px;
   line-height: 14px;
 }

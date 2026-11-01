@@ -1,243 +1,249 @@
+//! Per-window startup readiness.
+//!
+//! Each window label has its own state: the main window is revealed once its
+//! page has loaded (native fallback) AND its initial placement is done; the
+//! tray flyout never participates in the startup reveal (it is a hidden flyout
+//! toggled from the tray icon). Because the state is keyed by label, a signal
+//! from one window can never consume another window's reveal.
+
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-/// Coordinates the one-shot initial reveal between native page loading and the
-/// renderer's `host:ready` event. Both signals are intentionally accepted:
-/// page-load finished is the native fallback, while renderer readiness waits
-/// until the app has committed its first frame.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub(crate) struct StartupReadiness {
-    state: Arc<Mutex<State>>,
+    windows: Arc<Mutex<HashMap<String, WindowReadiness>>>,
+    /// Labels the startup reveal may show. Every other window (the tray
+    /// flyout) is a hidden surface toggled from the tray icon.
+    revealable: Arc<std::collections::HashSet<String>>,
 }
 
-#[derive(Default)]
-struct State {
-    page_ready: bool,
-    initial_placement_done: bool,
-    user_hidden: bool,
-    initial_visibility_decided: bool,
+impl Default for StartupReadiness {
+    fn default() -> Self {
+        Self::new(&["main"])
+    }
 }
 
 impl StartupReadiness {
-    /// Handle a native page-load finish or renderer `host:ready` event. The
-    /// callback runs while the state lock is held, so a concurrent tray hide
-    /// cannot be undone by a delayed readiness callback.
-    pub(crate) fn page_ready_and_reveal<F>(&self, reveal: F) -> bool
-    where
-        F: FnOnce() -> bool,
-    {
-        let mut state = self.lock_state();
-        state.page_ready = true;
-        Self::reveal_if_ready(&mut state, reveal)
-    }
-
-    /// Handle completion of initial native placement, with the same atomic
-    /// reveal guarantee as [`Self::page_ready_and_reveal`].
-    pub(crate) fn placement_ready_and_reveal<F>(&self, reveal: F) -> bool
-    where
-        F: FnOnce() -> bool,
-    {
-        let mut state = self.lock_state();
-        state.initial_placement_done = true;
-        Self::reveal_if_ready(&mut state, reveal)
-    }
-
-    /// Record a deliberate tray hide. A later readiness fallback must not
-    /// reopen a window the user has explicitly hidden.
-    pub(crate) fn mark_user_hidden(&self) {
-        let mut state = self.lock_state();
-        state.user_hidden = true;
-        if !state.initial_visibility_decided {
-            state.initial_visibility_decided = true;
+    pub(crate) fn new(revealable: &[&str]) -> Self {
+        Self {
+            windows: Arc::new(Mutex::new(HashMap::new())),
+            revealable: Arc::new(
+                revealable
+                    .iter()
+                    .map(|label| label.to_string())
+                    .collect(),
+            ),
         }
     }
+}
 
-    /// Record an explicit user/tray show. This consumes the initial reveal
-    /// opportunity so a later readiness callback cannot show it a second time.
-    pub(crate) fn mark_user_shown(&self) {
-        let mut state = self.lock_state();
-        state.user_hidden = false;
-        state.initial_visibility_decided = true;
-    }
+#[derive(Default)]
+struct WindowReadiness {
+    /// Whether the startup reveal may ever show this window.
+    revealable: bool,
+    /// The window's page finished loading (native fallback signal).
+    page_loaded: bool,
+    /// Initial placement/bounds were applied.
+    placement_done: bool,
+    /// The one-shot reveal ran successfully.
+    revealed: bool,
+    /// The user closed the window into the tray before it was revealed.
+    user_hidden: bool,
+    /// The user (tray/menu) explicitly showed the window, consuming the
+    /// automatic reveal.
+    user_shown: bool,
+}
 
-    fn lock_state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state
+impl StartupReadiness {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, WindowReadiness>> {
+        self.windows
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
-    fn reveal_if_ready<F>(state: &mut State, reveal: F) -> bool
-    where
-        F: FnOnce() -> bool,
-    {
-        if !state.page_ready
-            || !state.initial_placement_done
-            || state.user_hidden
-            || state.initial_visibility_decided
-        {
-            return false;
-        }
-        // Reserve the one-shot before calling native code. If the native
-        // operation fails, leave it available for the other readiness signal.
-        state.initial_visibility_decided = true;
-        if reveal() {
-            true
-        } else {
-            state.initial_visibility_decided = false;
-            false
-        }
+    fn state_for<'a>(
+        &self,
+        windows: &'a mut HashMap<String, WindowReadiness>,
+        label: &str,
+    ) -> &'a mut WindowReadiness {
+        windows.entry(label.to_owned()).or_insert_with(|| WindowReadiness {
+            revealable: self.revealable.contains(label),
+            ..WindowReadiness::default()
+        })
+    }
+
+    fn ready(state: &WindowReadiness) -> bool {
+        state.revealable
+            && state.page_loaded
+            && state.placement_done
+            && !state.revealed
+            && !state.user_hidden
+            && !state.user_shown
+    }
+
+    /// The window's page finished loading (native page-load fallback).
+    pub(crate) fn mark_page_loaded(&self, label: &str) {
+        let mut windows = self.lock();
+        self.state_for(&mut windows, label).page_loaded = true;
+    }
+
+    /// The window's initial placement (bounds/flags) was applied.
+    pub(crate) fn mark_placement_done(&self, label: &str) {
+        let mut windows = self.lock();
+        self.state_for(&mut windows, label).placement_done = true;
+    }
+
+    /// Both signals for this window are set and the one-shot reveal has not run
+    /// yet (and the user has not hidden/shown the window themselves).
+    pub(crate) fn should_reveal(&self, label: &str) -> bool {
+        let windows = self.lock();
+        windows
+            .get(label)
+            .map(Self::ready)
+            .unwrap_or(false)
+    }
+
+    /// Consume the one-shot reveal after a successful `show()`.
+    pub(crate) fn mark_revealed(&self, label: &str) {
+        let mut windows = self.lock();
+        self.state_for(&mut windows, label).revealed = true;
+    }
+
+    /// The user closed the window into the tray before it was revealed: the
+    /// automatic reveal must never fire afterwards.
+    pub(crate) fn mark_user_hidden(&self, label: &str) {
+        let mut windows = self.lock();
+        let state = self.state_for(&mut windows, label);
+        state.user_hidden = true;
+    }
+
+    /// The user (tray/menu) explicitly showed the window, consuming the
+    /// automatic reveal.
+    pub(crate) fn mark_user_shown(&self, label: &str) {
+        let mut windows = self.lock();
+        let state = self.state_for(&mut windows, label);
+        state.user_shown = true;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::StartupReadiness;
+    use super::*;
 
-    #[test]
-    fn repeated_page_and_placement_signals_reveal_once_page_first() {
-        let state = StartupReadiness::default();
-        let reveals = std::cell::Cell::new(0);
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(!state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert_eq!(reveals.get(), 1);
-    }
+    const MAIN: &str = "main";
+    const TRAY: &str = "tray";
 
-    #[test]
-    fn repeated_page_and_placement_signals_reveal_once_placement_first() {
-        let state = StartupReadiness::default();
-        let reveals = std::cell::Cell::new(0);
-        assert!(!state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(!state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert_eq!(reveals.get(), 1);
-    }
-
-    #[test]
-    fn failed_reveal_can_retry_after_multiple_failures_then_succeed() {
-        let state = StartupReadiness::default();
-        let attempts = std::cell::Cell::new(0);
-        assert!(!state.placement_ready_and_reveal(|| {
-            attempts.set(attempts.get() + 1);
-            false
-        }));
-        for _ in 0..3 {
-            assert!(!state.page_ready_and_reveal(|| {
-                attempts.set(attempts.get() + 1);
-                false
-            }));
+    /// The host-side reveal: gate on both signals, run the show, consume the
+    /// one-shot on success.
+    fn reveal_via<R: FnMut() -> bool>(
+        readiness: &StartupReadiness,
+        label: &str,
+        reveal: &mut R,
+    ) -> bool {
+        readiness.mark_page_loaded(label);
+        readiness.mark_placement_done(label);
+        if !readiness.should_reveal(label) {
+            return false;
         }
-        assert!(state.placement_ready_and_reveal(|| {
-            attempts.set(attempts.get() + 1);
+        if reveal() {
+            readiness.mark_revealed(label);
             true
-        }));
-        assert_eq!(attempts.get(), 4);
-        assert!(!state.page_ready_and_reveal(|| {
-            attempts.set(attempts.get() + 1);
-            true
-        }));
-        assert_eq!(attempts.get(), 4);
+        } else {
+            false
+        }
     }
 
     #[test]
-    fn failed_reveal_followed_by_user_hide_never_reveals() {
-        let state = StartupReadiness::default();
+    fn tray_signals_never_reveal_main_and_vice_versa() {
+        let readiness = StartupReadiness::new(&[MAIN]);
         let reveals = std::cell::Cell::new(0);
-        assert!(!state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            false
-        }));
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            false
-        }));
-        state.mark_user_hidden();
-        assert!(!state.placement_ready_and_reveal(|| {
+        let mut reveal = || {
             reveals.set(reveals.get() + 1);
             true
-        }));
-        assert_eq!(reveals.get(), 1);
-    }
+        };
 
-    #[test]
-    fn hide_then_show_before_readiness_does_not_reveal_later() {
-        let state = StartupReadiness::default();
-        let reveals = std::cell::Cell::new(0);
-        state.mark_user_hidden();
-        state.mark_user_shown();
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(!state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
+        // The tray page loads and its placement is done first: the tray is a
+        // hidden flyout, so nothing is revealed and MAIN is untouched.
+        assert!(!reveal_via(&readiness, TRAY, &mut reveal));
+        assert!(!readiness.should_reveal(MAIN));
         assert_eq!(reveals.get(), 0);
-    }
 
-    #[test]
-    fn hide_then_show_after_reveal_does_not_reveal_twice() {
-        let state = StartupReadiness::default();
-        let reveals = std::cell::Cell::new(0);
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        state.mark_user_hidden();
-        state.mark_user_shown();
-        assert!(!state.page_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
-        assert!(!state.placement_ready_and_reveal(|| {
-            reveals.set(reveals.get() + 1);
-            true
-        }));
+        // Now main becomes ready: it reveals exactly once.
+        assert!(reveal_via(&readiness, MAIN, &mut reveal));
+        assert!(!reveal_via(&readiness, MAIN, &mut reveal));
+        assert_eq!(reveals.get(), 1);
+
+        // Later tray signals still never reveal main.
+        assert!(!reveal_via(&readiness, TRAY, &mut reveal));
         assert_eq!(reveals.get(), 1);
     }
 
     #[test]
-    fn registers_host_ready_listener_before_building_window() {
-        let source = include_str!("lib.rs");
-        let listener = source
-            .find("listen(\"host:ready\"")
-            .expect("host:ready should be registered before the window is built");
-        let build = source
-            .find(".build()?")
-            .expect("main window build should remain in setup");
-        assert!(
-            listener < build,
-            "host:ready listener must be installed before the renderer can emit it"
-        );
+    fn main_signals_before_tray_reveal_exactly_once() {
+        let readiness = StartupReadiness::new(&[MAIN]);
+        let reveals = std::cell::Cell::new(0);
+        let mut reveal = || {
+            reveals.set(reveals.get() + 1);
+            true
+        };
+
+        assert!(reveal_via(&readiness, MAIN, &mut reveal));
+        assert!(!reveal_via(&readiness, MAIN, &mut reveal));
+        assert!(!reveal_via(&readiness, TRAY, &mut reveal));
+        assert_eq!(reveals.get(), 1);
+    }
+
+    #[test]
+    fn page_load_fallback_reveals_without_host_ready() {
+        // The renderer's host:ready cannot fire while the window is hidden
+        // (WebView2 suspends rendering, so rAF never runs): the native
+        // page-load is the operative signal.
+        let readiness = StartupReadiness::new(&[MAIN]);
+        let reveals = std::cell::Cell::new(0);
+        let mut reveal = || {
+            reveals.set(reveals.get() + 1);
+            true
+        };
+
+        assert!(reveal_via(&readiness, MAIN, &mut reveal));
+        assert_eq!(reveals.get(), 1);
+    }
+
+    #[test]
+    fn failed_reveal_retries_on_the_next_signal() {
+        let readiness = StartupReadiness::new(&[MAIN]);
+        let attempts = std::cell::Cell::new(0);
+        let mut failing = || {
+            attempts.set(attempts.get() + 1);
+            false
+        };
+
+        readiness.mark_page_loaded(MAIN);
+        // A failed show does not consume the one-shot: every subsequent signal
+        // retries the reveal.
+        assert!(!reveal_via(&readiness, MAIN, &mut failing));
+        assert_eq!(attempts.get(), 1);
+        assert!(!reveal_via(&readiness, MAIN, &mut failing));
+        assert_eq!(attempts.get(), 2);
+
+        assert!(reveal_via(&readiness, MAIN, &mut || {
+            attempts.set(attempts.get() + 1);
+            true
+        }));
+        // Once revealed, no further attempts are made.
+        assert!(!reveal_via(&readiness, MAIN, &mut failing));
+        assert_eq!(attempts.get(), 3);
+    }
+
+    #[test]
+    fn user_hide_before_readiness_never_auto_reveals() {
+        let readiness = StartupReadiness::new(&[MAIN]);
+        readiness.mark_user_hidden(MAIN);
+
+        assert!(!reveal_via(&readiness, MAIN, &mut || true));
+
+        // An explicit user show consumes the automatic reveal for good.
+        readiness.mark_user_shown(MAIN);
+        assert!(!reveal_via(&readiness, MAIN, &mut || true));
     }
 }

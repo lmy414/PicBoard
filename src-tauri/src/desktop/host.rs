@@ -13,12 +13,14 @@
 //! UI state and the real window never disagree.
 
 use crate::desktop::prefs::{
-    load as load_prefs, save as save_prefs, CloseBehavior, DesktopPreferences,
+    load as load_prefs, save as save_prefs, CloseBehavior, DesktopPreferences, GridSize,
+    HistoryRetentionDays,
 };
 use crate::desktop::{setup_tray, AutoStartManager};
 use crate::error::AppError;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State, WebviewWindow, WindowEvent};
 
 /// Debug/dev builds never register auto-start and report the toggle as
@@ -32,6 +34,9 @@ pub struct DesktopState {
     pub prefs: Mutex<DesktopPreferences>,
     pub auto_start: AutoStartManager,
     pub data_root: PathBuf,
+    /// Live clipboard-capture switch shared with the monitor thread, so
+    /// pausing takes effect without restarting the listener. `true` = recording.
+    capture: Arc<AtomicBool>,
 }
 
 impl DesktopState {
@@ -40,6 +45,11 @@ impl DesktopState {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clone()
+    }
+
+    /// `true` while clipboard capture is recording (mirrors `captureEnabled`).
+    pub fn capture_enabled_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.capture)
     }
 }
 
@@ -60,9 +70,10 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let _ = save_prefs(&data_root, &prefs);
 
     app.manage(DesktopState {
-        prefs: Mutex::new(prefs),
+        prefs: Mutex::new(prefs.clone()),
         auto_start,
         data_root,
+        capture: Arc::new(AtomicBool::new(prefs.capture_enabled)),
     });
 
     // Tray is always created: with closeBehavior tray/float it is the way the
@@ -71,14 +82,26 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Which settings a patch actually changed (drives side effects like an
+/// immediate retention cleanup).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SettingsChange {
+    pub retention_changed: bool,
+}
+
 /// Update settings from a renderer command; failures propagate to the caller
 /// so the UI never shows a fabricated success.
 pub fn update_settings(
     state: &State<'_, DesktopState>,
     close_behavior: Option<CloseBehavior>,
     auto_start: Option<bool>,
-) -> Result<DesktopPreferences, AppError> {
+    capture_enabled: Option<bool>,
+    history_retention_days: Option<HistoryRetentionDays>,
+    snap_to_grid: Option<bool>,
+    grid_size: Option<GridSize>,
+) -> Result<(DesktopPreferences, SettingsChange), AppError> {
     let mut prefs = state.current();
+    let previous_retention = prefs.history_retention_days;
     if let Some(value) = close_behavior {
         prefs.close_behavior = value;
     }
@@ -86,12 +109,63 @@ pub fn update_settings(
         state.auto_start.set_enabled(enabled)?;
         prefs.auto_start = enabled;
     }
+    if let Some(enabled) = capture_enabled {
+        prefs.capture_enabled = enabled;
+    }
+    if let Some(days) = history_retention_days {
+        prefs.history_retention_days = days;
+    }
+    if let Some(snap) = snap_to_grid {
+        prefs.snap_to_grid = snap;
+    }
+    if let Some(size) = grid_size {
+        prefs.grid_size = size;
+    }
     save_prefs(&state.data_root, &prefs)?;
+    state
+        .capture
+        .store(prefs.capture_enabled, Ordering::Release);
     *state
         .prefs
         .lock()
         .unwrap_or_else(|poison| poison.into_inner()) = prefs.clone();
-    Ok(prefs)
+    let change = SettingsChange {
+        retention_changed: prefs.history_retention_days != previous_retention,
+    };
+    Ok((prefs, change))
+}
+
+/// Remember the user-chosen bounds of the expanded window. Called (debounced)
+/// from the window controller whenever the user resizes or moves the expanded
+/// window; failures are logged, never surfaced to the renderer.
+pub fn remember_window_bounds(
+    app: &AppHandle,
+    bounds: &crate::window_geometry::Rect,
+    monitor: Option<String>,
+) {
+    let Some(state) = app.try_state::<DesktopState>() else {
+        return;
+    };
+    let saved = crate::desktop::SavedWindowBounds {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        monitor,
+    };
+    let mut prefs = state.current();
+    if prefs.window_bounds.as_ref() == Some(&saved) {
+        return;
+    }
+    prefs.window_bounds = Some(saved);
+    if let Err(error) = save_prefs(&state.data_root, &prefs) {
+        eprintln!("[desktop] failed to save window bounds: {error}");
+        return;
+    }
+    *state
+        .prefs
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner()) = prefs;
 }
 
 /// Install the close-request interception on the main window. Both the
@@ -99,6 +173,10 @@ pub fn update_settings(
 ///
 /// All three behaviors prevent the raw close because a live tray icon keeps
 /// the process running; quitting must therefore exit the app explicitly.
+///
+/// Only `prevent_close()` (a flag) runs inside the callback: hiding or exiting
+/// re-entrantly from the event dispatch is what froze the UI thread, so the
+/// action itself is deferred to a worker.
 pub fn install_close_behavior(window: &WebviewWindow) -> Result<(), AppError> {
     let app = window.app_handle().clone();
     window.on_window_event(move |event| {
@@ -108,34 +186,23 @@ pub fn install_close_behavior(window: &WebviewWindow) -> Result<(), AppError> {
             };
             let behavior = state.current().close_behavior;
             api.prevent_close();
-            let _ = apply_close_action(&app, behavior);
+            let app = app.clone();
+            crate::platform::spawn_worker("picboard-close-action", move || {
+                if let Err(error) = apply_close_action(&app, behavior) {
+                    eprintln!("[desktop] close action failed: {error}");
+                }
+            });
         }
     });
     Ok(())
 }
 
-/// Perform the close action after a prevented close: collapse to ball, hide,
-/// or fully quit (exit kills the tray too).
+/// Perform the close action after a prevented close: hide into the tray or
+/// fully quit (exit kills the tray too).
 pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<(), AppError> {
     match behavior {
         CloseBehavior::Quit => {
             app.exit(0);
-            Ok(())
-        }
-        CloseBehavior::Float => {
-            // A user close is a normal drag end context: stop polling without
-            // flushing a stale candidate, then collapse the window.
-            app.state::<crate::window_controller::WindowController>()
-                .cancel_drag();
-            crate::window_controller::set_window_expanded_state(app, false)?;
-            if let Some(window) = app.get_webview_window("main") {
-                if let Some(readiness) =
-                    app.try_state::<crate::startup_readiness::StartupReadiness>()
-                {
-                    readiness.mark_user_shown();
-                }
-                window.show()?;
-            }
             Ok(())
         }
         CloseBehavior::Tray => {
@@ -143,13 +210,10 @@ pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<()
                 .get_webview_window("main")
                 .ok_or_else(|| AppError::message("主窗口不存在"))?;
             if let Some(readiness) = app.try_state::<crate::startup_readiness::StartupReadiness>() {
-                readiness.mark_user_hidden();
+                readiness.mark_user_hidden("main");
             }
-            app.state::<crate::window_controller::WindowController>()
-                .cancel_drag();
-            app.state::<crate::window_controller::WindowController>()
-                .stop_cursor_tracking();
-            crate::window_controller::set_window_expanded_state(app, false)?;
+            // Hiding keeps the process, the tray icon and the background
+            // clipboard capture alive.
             window.hide()?;
             Ok(())
         }

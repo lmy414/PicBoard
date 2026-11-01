@@ -4,113 +4,85 @@ import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "..");
+const read = (relativePath) => readFile(path.join(root, relativePath), "utf8");
 
-test("settings page and bloub renderer remain connected", async () => {
-  const app = await readFile(path.join(root, "renderer/src/App.tsx"), "utf8");
-  const ball = await readFile(path.join(root, "renderer/src/BloubBall.tsx"), "utf8");
-  const settings = await readFile(path.join(root, "renderer/src/ball-settings.ts"), "utf8");
+test("settings page keeps the tray-era surface connected", async () => {
+  const app = await read("renderer/src/App.tsx");
+  const shell = await read("renderer/src/ui/ShellSettings.tsx");
+  const settings = await read("renderer/src/ball-settings.ts");
 
   assert.match(app, /viewMode === "settings"/);
-  assert.match(app, /文件路径/);
+  assert.match(app, /<PluginsSection/);
+  assert.match(app, /后台记录剪贴板/);
+  assert.match(app, /历史保留时间/);
+  assert.match(app, /已放到画布上或已分类的内容不会被自动清理/);
   assert.match(app, /分类类别/);
-  assert.match(app, /画布临时路径/);
-  assert.match(ball, /new BotEngine/);
-  assert.match(ball, /<mask/);
-  assert.match(ball, /window\.addEventListener\("pointermove"/);
-  assert.match(ball, /onCursorPosition/);
-  assert.match(ball, /bloub-hovered/);
-  assert.match(ball, /onPointerEnter/);
-  assert.match(app, /setPointerCapture/);
-  assert.match(app, /onLostPointerCapture/);
-  assert.match(app, /dragStartedRef\.current\) finish\(false\)/);
-  assert.match(app, /activePointerRef\.current === event\.pointerId && !dragStartedRef\.current/);
-  assert.match(app, /visibilitychange/);
-  assert.match(app, /copyImageFiles/);
-  assert.match(app, /正在复制图片文件/);
-  assert.match(app, /setBusy\(true\)/);
-  assert.match(app, /loadError/);
-  assert.match(ball, /pointerToLookTarget/);
-  assert.match(ball, /setLook\(settings\.followGaze \? [\s\S]*: null/);
-  assert.match(ball, /engine\.setLook/);
-  assert.match(ball, /REST_STATES/);
-  assert.match(ball, /SPARK_STATES/);
+  assert.match(app, /文件路径/);
+  assert.match(shell, /收纳到托盘/);
+  assert.match(shell, /退出程序/);
+  assert.doesNotMatch(shell, /悬浮球|"float"/);
+  assert.doesNotMatch(app, /收起为悬浮球|悬浮球|CollapsedBall|BloubBall/);
+  assert.doesNotMatch(app, /drag-in|importImages|importText|ACCEPTED_EXTENSIONS/);
+  assert.match(app, /onNavigate/);
+  assert.match(app, /revision/);
+  assert.match(app, /document\.addEventListener\("dragover", block\)/);
+  assert.match(app, /AppLogo/);
   assert.match(settings, /quick-image-board\.ball-settings/);
   await access(path.join(root, "renderer/src/third-party/bloub/LICENSE"));
 });
 
-test("canvas authorization iteration keeps image intent and keyboard guards explicit", async () => {
-  const app = await readFile(path.join(root, "renderer/src/App.tsx"), "utf8");
-  const css = await readFile(path.join(root, "renderer/src/styles.css"), "utf8");
-  const ball = await readFile(path.join(root, "renderer/src/BloubBall.tsx"), "utf8");
+test("canvas shell keeps explicit keyboard and paste guards", async () => {
+  const app = await read("renderer/src/App.tsx");
+  const stage = await read("renderer/src/canvas/CanvasStage.tsx");
+  const css = await read("renderer/src/styles.css");
 
-  assert.match(app, /const \[hoveredId, setHoveredId\]/);
-  assert.match(app, /previewId[^\n]*selectedIds[^\n]*hoveredId/);
-  assert.match(app, /!panelVisible \|\| busy/);
-  assert.match(app, /contenteditable=true/);
-  assert.doesNotMatch(app, /onDoubleClick/);
-  assert.match(app, /onContextMenu/);
-  assert.match(app, /pointerId/);
-  assert.match(app, /onLostPointerCapture/);
-  assert.match(app, /aria-modal/);
-  assert.match(app, /tabIndex=\{0\}/);
-  assert.match(app, /selection-rect/);
-  assert.match(app, /zoomAroundPoint/);
-  assert.match(app, /clampPreviewOffset/);
-  assert.match(app, /renameImage/);
-  assert.match(app, /deleteClassifiedImages/);
-  assert.match(app, /requestAnimationFrame/);
-  assert.match(app, /onLostPointerCapture/);
-  assert.match(app, /dragDepthRef/);
-  assert.match(app, /onDragEnter/);
-  assert.match(app, /dropActive/);
-  assert.match(app, /library-card/);
-  assert.doesNotMatch(app, /library-card[^\n]*onDoubleClick/);
-  assert.match(app, /showRemove=\{false\}/);
-  assert.match(app, /setSelectedIds\(\[\]\)/);
-  assert.match(app, /const selectImage = .*toggleSelection/);
-  assert.match(app, /onSelect\(null, image\.id, true\)/);
-  assert.match(app, /onQuickActions\(event, image.id\)/);
-  assert.match(app, /className="card-more"/);
-  assert.match(app, /if \(event\.shiftKey\) onSelect\(event, image\.id, true\); else onPreview\(image\.id\)/);
-  assert.match(app, /selectedIds: string\[\]/);
-  assert.match(app, /aria-selected=\{selected\}/);
-  assert.match(app, /dialogOpen/);
-  assert.match(app, /if \(dialogOpen\) return/);
-  assert.match(app, /previouslyFocusedRef/);
-  assert.match(app, /const focusable/);
-  assert.match(app, /Windows 系统回收站/);
-  assert.match(app, /不会自动恢复 PicBoard 索引/);
-  assert.doesNotMatch(app, /将永久删除 .*已分类图片/);
-  const deleteTarget = app.slice(app.indexOf("const deleteTargetIds"), app.indexOf("const handleKeyDown", app.indexOf("const deleteTargetIds")));
-  assert.match(deleteTarget, /key === "Delete" && hoveredId && currentCanvasIds\.has\(hoveredId\)/);
-  assert.ok(deleteTarget.indexOf("if (previewId") < deleteTarget.indexOf('key === "Delete"'));
-  assert.ok(deleteTarget.indexOf('key === "Delete"') < deleteTarget.indexOf("return selectedIds.filter"));
-  const copyTarget = app.slice(app.indexOf("const copyTargetIds"), app.indexOf("const deleteTargetIds"));
-  assert.doesNotMatch(copyTarget, /hoveredId/);
-  assert.match(app, /setSelectionAnchor\(panelAnchorFor\(origin\)\)/);
-  assert.match(app, /closest<HTMLElement>\("\.quick-actions, \.preview-card"\)/);
-  assert.match(app, /container\.clientWidth - card\.offsetWidth - 12/);
-  assert.match(app, /container\.clientHeight - card\.offsetHeight - 12/);
-  assert.match(css, /\.quick-actions\.anchored/);
-  assert.match(css, /\.library-card\.selected/);
-  assert.match(css, /max-height: min\(420px, calc\(100% - 40px\)\)/);
-  assert.match(css, /preview-image-wrap\.zoomed/);
-  assert.match(css, /bloub-drop-success/);
+  // Inputs and rich editors keep native paste and editing keys.
+  assert.match(app, /\[contenteditable\]:not\(\[contenteditable="false"\]\), \.ProseMirror/);
+  assert.match(app, /if \(isEditableTarget\(event\.target\)\) return/);
+  // A mounted full page owns Escape and its editing shortcuts.
+  assert.match(app, /pageRef\.current\) return/);
+  assert.match(app, /dialogRef\.current \|\| actionsRef\.current/);
+  // Delete and copy operate on the current selection with the documented wording.
+  assert.match(app, /selectedNodeIdsRef\.current\.length > 0 \|\| selectedEdgeIdsRef\.current\.length > 0/);
+  assert.match(app, /已从画布移除，内容仍在剪贴板历史/);
+  assert.match(app, /剪贴板中没有可收纳的内容/);
+  const tree = await read("renderer/src/ui/CanvasTree.tsx");
+  assert.match(tree, /text\/x-picboard-canvas/);
+  assert.doesNotMatch(app, /onDragEnter|handleDragEnter|ACCEPTED_EXTENSIONS/);
+  assert.match(app, /document\.addEventListener\("dragover", block\)/);
+
+  // Gestures write the DOM directly and never leak pointer capture.
+  assert.match(stage, /requestAnimationFrame/);
+  assert.match(stage, /setPointerCapture/);
+  assert.match(stage, /releasePointerCapture/);
+  assert.match(stage, /edgeLayerRef\.current\?\.updateDrag/);
+  assert.match(stage, /classList\.add\("connect-target"\)/);
+  assert.match(stage, /className=\{`canvas-viewport/);
+
+  assert.match(css, /\.canvas-node\.selected/);
   assert.match(css, /prefers-reduced-motion/);
-  assert.match(ball, /dragOpen/);
-  assert.match(ball, /bloub-drag-open/);
+  assert.match(css, /\.edge-layer/);
+  assert.match(css, /\.history-slot\.open/);
+  assert.match(css, /\.history-slot\.overlay/);
+  assert.doesNotMatch(css, /bloub|intake-badge|collapsed-shell/);
 });
 
-test("canvas cards keep right-click actions without a more button", async () => {
-  const app = await readFile(new URL("../renderer/src/App.tsx", import.meta.url), "utf8");
-  const canvas = app.slice(app.indexOf("function CanvasImage("), app.indexOf("function QuickPreview("));
-  assert.doesNotMatch(canvas, /className="card-more"/);
-  assert.match(canvas, /onContextMenu=\{contextMenu\}/);
+test("canvas nodes keep right-click actions without a more button", async () => {
+  const node = await read("renderer/src/canvas/CanvasNodeView.tsx");
+  assert.doesNotMatch(node, /className="card-more"/);
+  assert.match(node, /onContextMenu=/);
+  assert.match(node, /role="button"/);
+  assert.match(node, /tabIndex=\{0\}/);
+  assert.match(node, /onDoubleClick=/);
+  assert.match(node, /node-handle/);
 });
 
-test("canvas preview retains remove while library retains recycle", async () => {
-  const app = await readFile(new URL("../renderer/src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /viewMode === "canvas" && <QuickActions.*showRemove=\{true\}/);
-  assert.match(app, /viewMode === "library" && <QuickActions.*showRemove=\{false\}/);
-  assert.doesNotMatch(app, /showRemove=\{!previewId\}/);
+test("history drag placement converts through the live canvas transform", async () => {
+  const app = await read("renderer/src/App.tsx");
+  const stage = await read("renderer/src/canvas/CanvasStage.tsx");
+  assert.match(app, /<HistoryDrawer/);
+  assert.match(app, /onDropToCanvas=\{dropHistoryContent\}/);
+  assert.match(app, /stage\.containsClient\(clientX, clientY\)/);
+  assert.match(app, /stage\.worldPoint\(clientX, clientY\)/);
+  assert.match(stage, /importViewport\(\)/);
 });

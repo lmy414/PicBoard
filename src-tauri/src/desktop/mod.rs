@@ -18,7 +18,10 @@ mod prefs;
 mod tray;
 
 pub use autostart::AutoStartManager;
-pub use host::{install_close_behavior, setup as setup_desktop, update_settings, DesktopState};
+pub use host::{
+    install_close_behavior, remember_window_bounds, setup as setup_desktop, update_settings,
+    DesktopState,
+};
 pub use picker::pick_directory;
-pub use prefs::CloseBehavior;
+pub use prefs::{CloseBehavior, GridSize, HistoryRetentionDays, SavedWindowBounds};
 pub use tray::setup_tray;

@@ -3,7 +3,10 @@ import { IconAlertTriangle, IconCheck, IconClose, IconInfo } from "./Icons";
 
 export type ToastKind = "success" | "error" | "info" | "warning";
 export type ToastMessage = { id: string; kind: ToastKind; message: string };
-export function toastChannel() {
+export interface ToastChannel {
+  next(kind: ToastKind, message: string): ToastMessage;
+}
+export function toastChannel(): ToastChannel {
   let seq = 0;
   return { next(kind: ToastKind, message: string): ToastMessage {
     return { id: `${kind}-${++seq}`, kind, message };

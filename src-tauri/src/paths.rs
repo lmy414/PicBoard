@@ -59,25 +59,3 @@ pub fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, AppError> {
     }
     Ok(root.join(candidate))
 }
-
-/// Sanitize a user/category-provided segment for use in a relative filesystem path.
-/// Mirrors Electron `safeSegment`: illegal characters and control chars become `_`,
-/// then trimmed; an empty result falls back to `其他`.
-pub fn sanitize_segment(value: &str) -> String {
-    let mut output = value
-        .chars()
-        .map(|ch| {
-            if "<>:\"/\\|?*".contains(ch) || ch.is_control() {
-                '_'
-            } else {
-                ch
-            }
-        })
-        .collect::<String>();
-    output = output.trim().to_owned();
-    if output.is_empty() {
-        "其他".to_owned()
-    } else {
-        output
-    }
-}

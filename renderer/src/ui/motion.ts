@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Small single-purpose animation helper for the UI lane (contract:
@@ -65,6 +65,28 @@ export function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - x, 3);
 }
 
+/**
+ * Evaluate a CSS cubic-bezier(x1, y1, x2, y2) timing function at `t`, so JS
+ * motion (FLIP, edge following) matches the CSS motion tokens exactly.
+ * Solves x(s) = t by bisection, then returns y(s).
+ */
+export function cubicBezierProgress(x1: number, y1: number, x2: number, y2: number, t: number): number {
+  const progress = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0));
+  const curve = (a1: number, a2: number, s: number): number =>
+    3 * (1 - s) * (1 - s) * s * a1 + 3 * (1 - s) * s * s * a2 + s * s * s;
+  let low = 0;
+  let high = 1;
+  let s = progress;
+  for (let i = 0; i < 24; i += 1) {
+    const current = curve(x1, x2, s);
+    if (Math.abs(current - progress) < 1e-5) break;
+    if (current < progress) low = s;
+    else high = s;
+    s = (low + high) / 2;
+  }
+  return curve(y1, y2, s);
+}
+
 /** Eased `value`, with a single visible overshoot near the end. */
 export function easeOutBack(t: number): number {
   const x = Math.min(1, Math.max(0, t));
@@ -89,4 +111,60 @@ export function useDelayedFlag(delayMs: number, active: boolean): boolean {
     return () => window.clearTimeout(id);
   }, [delayMs, active]);
   return active && elapsed;
+}
+
+export interface PresenceState {
+  /** Render the element while true (including the exit window). */
+  mounted: boolean;
+  /** Feed to `data-motion`; CSS presets key on enter/exit. */
+  phase: "enter" | "idle" | "exit";
+}
+
+/** Enter preset duration; must stay in sync with --motion-base. */
+const PRESENCE_ENTER_MS = 200;
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * Keep a popup/row mounted through its exit animation and expose the phase for
+ * the CSS presets. Usage:
+ *
+ *   const presence = usePresence(open, 140);
+ *   if (!presence.mounted) return null;
+ *   return <div className="motion-pop" data-motion={presence.phase}>…</div>;
+ *
+ * Enter plays for 200 ms and then settles to "idle"; exit keeps `mounted` true
+ * for `exitMs` so the shorter ease-in exit can finish. Reduced motion unmounts
+ * (and settles) immediately.
+ */
+export function usePresence(open: boolean, exitMs = 160): PresenceState {
+  const [state, setState] = useState<PresenceState>(() => ({ mounted: open, phase: open ? "enter" : "idle" }));
+  const mountedRef = useRef(state.mounted);
+  mountedRef.current = state.mounted;
+
+  useEffect(() => {
+    if (open) {
+      const reduced = prefersReducedMotion();
+      setState({ mounted: true, phase: reduced ? "idle" : "enter" });
+      if (reduced) return;
+      const timer = window.setTimeout(() => {
+        setState((current) => (current.mounted ? { mounted: true, phase: "idle" } : current));
+      }, PRESENCE_ENTER_MS);
+      return () => window.clearTimeout(timer);
+    }
+    if (!mountedRef.current) return;
+    if (prefersReducedMotion()) {
+      setState({ mounted: false, phase: "idle" });
+      return;
+    }
+    setState({ mounted: true, phase: "exit" });
+    const timer = window.setTimeout(() => setState({ mounted: false, phase: "idle" }), exitMs);
+    return () => window.clearTimeout(timer);
+  }, [open, exitMs]);
+
+  return state;
 }

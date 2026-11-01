@@ -1,27 +1,24 @@
 //! Native Windows clipboard support (no Electron, no PowerShell helper).
-//! Clipboard access is short-lived and synchronous inside a single Open/Close
-//! pair on the calling thread.
 //!
-//! Reading handles `CF_DIBV5`, `CF_DIB`, `CF_BITMAP` and the registered "PNG"
-//! format some producers publish. DIB parsing covers 1/4/8 bpp indexed,
-//! 16/24/32 bpp direct color, bottom-up and top-down rows, and alpha from V4/V5
-//! embedded masks or a BI_BITFIELDS fourth mask. Everything is re-encoded to
-//! PNG so storage import is uniform with Electron's
-//! `clipboard.readImage().toPNG()`.
+//! Reading happens in one `OpenClipboard`/`CloseClipboard` session that looks
+//! at every format the capture rules need: the Windows opt-out markers,
+//! PicBoard's own content-id marker, CF_UNICODETEXT, the `HTML Format`
+//! fragment, and bitmap data (`PNG`, CF_DIBV5, CF_DIB, CF_BITMAP) which is
+//! re-encoded to PNG so storage is uniform.
 //!
-//! Writing publishes `CF_HDROP` (DROPFILES header + UTF-16 list, double NUL) for
-//! every copy; a single image also publishes a 32bpp alpha-preserving
-//! `CF_BITMAP` DIBSection. Both formats are staged in one clipboard ownership
-//! window so publishing the second never clears the first.
+//! Writing publishes every requested native format inside one ownership window
+//! (`EmptyClipboard` once, then CF_UNICODETEXT, CF_HTML, CF_HDROP, a single
+//! CF_BITMAP and the self marker together), so publishing a later format never
+//! clears an earlier one.
 
 use crate::error::AppError;
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use windows_sys::core::PCWSTR;
 use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -35,14 +32,26 @@ use windows_sys::Win32::System::DataExchange::{
 use windows_sys::Win32::System::Memory::{
     GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
 };
-use windows_sys::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_DIBV5, CF_HDROP};
+use windows_sys::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_DIBV5, CF_HDROP, CF_UNICODETEXT};
 use windows_sys::Win32::UI::Shell::DROPFILES;
+
+use super::html;
+use super::{ClipboardCapture, ClipboardWrite, MAX_CAPTURE_BYTES};
 
 const DROPFILES_HEADER: u32 = 20;
 const MAX_RETRIES: u32 = 40;
 /// Practical upper bound for one pasted bitmap (256M pixels ~ 1 GiB RGBA). A
 /// corrupt header must not turn into a giant allocation.
 const MAX_PIXELS: u64 = 256 * 1024 * 1024;
+
+/// Registered format carrying a UTF-8 JSON array of PicBoard content ids.
+const SELF_MARKER_FORMAT: &[u8] = b"PicBoard.ContentIds";
+/// Windows 10+ opt-out: "never let clipboard history or cloud sync see this".
+const EXCLUDE_FORMAT: &[u8] = b"ExcludeClipboardContentFromMonitorProcessing";
+/// DWORD 0 means "do not include this in clipboard history".
+const INCLUDE_IN_HISTORY_FORMAT: &[u8] = b"CanIncludeInClipboardHistory";
+/// Legacy "clipboard viewer ignore" opt-out used by password managers.
+const VIEWER_IGNORE_FORMAT: &[u8] = b"Clipboard Viewer Ignore";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -95,8 +104,6 @@ impl HeaderLayout {
         }
     }
 }
-
-/// Convenience for parsing a little-endian value at a fixed header offset.
 
 /// Byte range the `biSize` header claims, computed with checked arithmetic so
 /// overflow cannot bypass length checks.
@@ -163,6 +170,38 @@ fn with_clipboard<T>(f: impl FnOnce() -> Result<T, AppError>) -> Result<T, AppEr
     }
 }
 
+/// Register (or look up) a named clipboard format.
+fn registered_format(name: &[u8]) -> u32 {
+    let wide: Vec<u16> = name
+        .iter()
+        .map(|&byte| u16::from(byte))
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe { RegisterClipboardFormatW(wide.as_ptr() as PCWSTR) }
+}
+
+/// Borrow the bytes behind a clipboard handle while keeping the lock/unlock
+/// pair in one place.
+unsafe fn with_global_bytes<T>(
+    format: u32,
+    f: impl FnOnce(&[u8]) -> T,
+) -> Option<Option<T>> {
+    let handle = GetClipboardData(format);
+    if handle.is_null() {
+        return None;
+    }
+    let handle = handle as HGLOBAL;
+    let memory = GlobalLock(handle);
+    if memory.is_null() {
+        return Some(None);
+    }
+    let size = GlobalSize(handle);
+    let bytes = std::slice::from_raw_parts(memory as *const u8, size);
+    let result = f(bytes);
+    GlobalUnlock(handle);
+    Some(Some(result))
+}
+
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
@@ -171,50 +210,153 @@ fn with_clipboard<T>(f: impl FnOnce() -> Result<T, AppError>) -> Result<T, AppEr
 /// real PNG byte stream. It avoids lossy/odd DIB variants and can carry alpha
 /// that plain CF_DIB cannot.
 fn png_clipboard_format() -> u32 {
-    static FORMAT: OnceLock<u32> = OnceLock::new();
-    *FORMAT.get_or_init(|| {
-        let wide: Vec<u16> = b"PNG\0".iter().map(|&byte| byte as u16).collect();
-        unsafe { RegisterClipboardFormatW(wide.as_ptr() as PCWSTR) }
+    static FORMAT: LazyLock<u32> = LazyLock::new(|| registered_format(b"PNG"));
+    *FORMAT
+}
+
+/// Read every supported format in one clipboard session.
+pub fn read_capture() -> Result<ClipboardCapture, AppError> {
+    with_clipboard(|| unsafe {
+        let mut capture = ClipboardCapture {
+            excluded: super::is_excluded(
+                format_available(EXCLUDE_FORMAT),
+                include_in_history_is_zero(),
+                format_available(VIEWER_IGNORE_FORMAT),
+            ),
+            ..ClipboardCapture::default()
+        };
+        capture.self_marker = read_self_marker();
+        if let Some(text) = read_text()? {
+            // Bound measured in UTF-8 bytes of the decoded string.
+            if text.len() > MAX_CAPTURE_BYTES {
+                capture.text_too_large = true;
+            } else {
+                capture.text = Some(text);
+            }
+        }
+        capture.html = read_html();
+        match read_image_locked() {
+            Ok(Some(png)) => capture.image = Some(png),
+            Ok(None) => {}
+            Err(error) => capture.image_error = Some(error.0),
+        }
+        Ok(capture)
     })
 }
 
-/// Read an image from the clipboard and return PNG bytes.
-/// `Ok(None)` means the clipboard holds no image we understand.
-pub fn read_image_png() -> Result<Option<Vec<u8>>, AppError> {
-    with_clipboard(|| unsafe {
-        // Transparent/precise path first: some producers publish a real PNG.
-        if let Some(png) = read_standard_png()? {
-            return Ok(Some(png));
+unsafe fn format_available(name: &[u8]) -> bool {
+    let format = registered_format(name);
+    format != 0 && IsClipboardFormatAvailable(format) != 0
+}
+
+/// `CanIncludeInClipboardHistory` carries a DWORD; `0` opts out. A missing
+/// format, a missing handle or a short block all mean "not excluded".
+unsafe fn include_in_history_is_zero() -> bool {
+    let format = registered_format(INCLUDE_IN_HISTORY_FORMAT);
+    if format == 0 || IsClipboardFormatAvailable(format) == 0 {
+        return false;
+    }
+    match with_global_bytes(format, |bytes| {
+        if bytes.len() >= 4 {
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) == 0
+        } else {
+            false
         }
-        // Otherwise try DIB variants most specific first (V5 can carry alpha,
-        // plain DIB next, legacy HBITMAP last). A present-but-undecodable
-        // format must not hide the others, and when every present format fails
-        // we surface a diagnostic instead of a silent "no image".
-        let mut attempts = 0usize;
-        let mut failed: Vec<String> = Vec::new();
-        for (label, format) in [
-            ("CF_DIBV5", CF_DIBV5 as u32),
-            ("CF_DIB", CF_DIB as u32),
-            ("CF_BITMAP", CF_BITMAP as u32),
-        ] {
-            if IsClipboardFormatAvailable(format) == 0 {
-                continue;
-            }
-            attempts += 1;
-            match read_format(format) {
-                Ok(Some(png)) => return Ok(Some(png)),
-                Ok(None) => {}
-                Err(error) => failed.push(format!("{label}：{error}")),
-            }
+    }) {
+        Some(Some(excluded)) => excluded,
+        _ => false,
+    }
+}
+
+/// CF_UNICODETEXT as a String. `Ok(None)` when the format is absent.
+unsafe fn read_text() -> Result<Option<String>, AppError> {
+    let format = CF_UNICODETEXT as u32;
+    if IsClipboardFormatAvailable(format) == 0 {
+        return Ok(None);
+    }
+    match with_global_bytes(format, |bytes: &[u8]| {
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let end = units.iter().position(|unit| *unit == 0).unwrap_or(units.len());
+        String::from_utf16_lossy(&units[..end])
+    }) {
+        Some(Some(text)) => Ok(Some(text)),
+        _ => Ok(None),
+    }
+}
+
+/// The `HTML Format` fragment, if the clipboard carries visible markup.
+unsafe fn read_html() -> Option<String> {
+    let format = registered_format(b"HTML Format");
+    if format == 0 || IsClipboardFormatAvailable(format) == 0 {
+        return None;
+    }
+    with_global_bytes(format, |bytes| {
+        // Drop the trailing NUL some producers append before decoding.
+        let end = bytes.iter().rposition(|byte| *byte != 0).map_or(0, |index| index + 1);
+        if end > MAX_CAPTURE_BYTES {
+            return None;
         }
-        if attempts > 0 && !failed.is_empty() {
-            return Err(AppError::message(format!(
-                "剪贴板图片解码失败：{}",
-                failed.join("；")
-            )));
-        }
-        Ok(None)
+        let raw = std::str::from_utf8(&bytes[..end]).ok()?;
+        let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
+        Some(html::parse_fragment(raw))
     })
+    .flatten()
+    .flatten()
+}
+
+/// PicBoard's self marker. `Some(ids)` (possibly empty when the payload is
+/// unreadable) means "this clipboard content came from PicBoard".
+unsafe fn read_self_marker() -> Option<Vec<String>> {
+    let format = registered_format(SELF_MARKER_FORMAT);
+    if format == 0 || IsClipboardFormatAvailable(format) == 0 {
+        return None;
+    }
+    let parsed = with_global_bytes(format, |bytes| {
+        let end = bytes.iter().rposition(|byte| *byte != 0).map_or(0, |index| index + 1);
+        let text = String::from_utf8_lossy(&bytes[..end]).into_owned();
+        serde_json::from_str::<Vec<String>>(&text).ok()
+    });
+    Some(parsed.flatten().flatten().unwrap_or_default())
+}
+
+/// Decode the best available bitmap format into PNG. The clipboard must already
+/// be open. `Ok(None)` means the clipboard holds no image we understand.
+unsafe fn read_image_locked() -> Result<Option<Vec<u8>>, AppError> {
+    // Transparent/precise path first: some producers publish a real PNG.
+    if let Some(png) = read_standard_png()? {
+        return Ok(Some(png));
+    }
+    // Otherwise try DIB variants most specific first (V5 can carry alpha,
+    // plain DIB next, legacy HBITMAP last). A present-but-undecodable format
+    // must not hide the others, and when every present format fails we surface
+    // a diagnostic instead of a silent "no image".
+    let mut attempts = 0usize;
+    let mut failed: Vec<String> = Vec::new();
+    for (label, format) in [
+        ("CF_DIBV5", CF_DIBV5 as u32),
+        ("CF_DIB", CF_DIB as u32),
+        ("CF_BITMAP", CF_BITMAP as u32),
+    ] {
+        if IsClipboardFormatAvailable(format) == 0 {
+            continue;
+        }
+        attempts += 1;
+        match read_format(format) {
+            Ok(Some(png)) => return Ok(Some(png)),
+            Ok(None) => {}
+            Err(error) => failed.push(format!("{label}：{error}")),
+        }
+    }
+    if attempts > 0 && !failed.is_empty() {
+        return Err(AppError::message(format!(
+            "剪贴板图片解码失败：{}",
+            failed.join("；")
+        )));
+    }
+    Ok(None)
 }
 
 /// Decode one clipboard bitmap format (CF_DIBV5 / CF_DIB, or CF_BITMAP via
@@ -741,43 +883,93 @@ unsafe fn read_bitmap() -> Result<Option<Vec<u8>>, AppError> {
 // Writing
 // ---------------------------------------------------------------------------
 
-/// Publish absolute image file paths. Empty input is a no-op. A single path
-/// additionally publishes decoded pixels as CF_BITMAP.
-pub fn write_image_files(paths: &[std::path::PathBuf]) -> Result<(), AppError> {
-    if paths.is_empty() {
-        return Ok(());
-    }
+/// Publish every requested format in one clipboard ownership window.
+pub fn write_contents(payload: &ClipboardWrite) -> Result<(), AppError> {
     with_clipboard(|| unsafe {
-        EmptyClipboard();
-        let drop_handle = build_dropfiles(paths)?;
-        if SetClipboardData(CF_HDROP as u32, drop_handle as *mut core::ffi::c_void).is_null() {
-            let _ = GlobalFree(drop_handle);
-            return Err(AppError::message("无法写入文件剪贴板（CF_HDROP）"));
+        if EmptyClipboard() == 0 {
+            return Err(AppError::message("无法清空系统剪贴板"));
         }
-        if paths.len() == 1 {
-            match build_bitmap(&paths[0]) {
-                Ok(Some(bitmap)) => {
+        if let Some(text) = payload.text.as_deref() {
+            set_global_bytes(CF_UNICODETEXT as u32, &utf16_bytes(text))?;
+        }
+        if let Some(fragment) = payload.html.as_deref() {
+            let document = html::build_document(fragment);
+            let format = registered_format(b"HTML Format");
+            if format == 0 {
+                return Err(AppError::message("无法注册 HTML 剪贴板格式"));
+            }
+            set_global_bytes(format, &nul_terminated(document.as_bytes()))?;
+        }
+        if !payload.files.is_empty() {
+            let drop_handle = build_dropfiles(&payload.files)?;
+            if SetClipboardData(CF_HDROP as u32, drop_handle as *mut core::ffi::c_void).is_null()
+            {
+                let _ = GlobalFree(drop_handle);
+                return Err(AppError::message("无法写入文件剪贴板（CF_HDROP）"));
+            }
+        }
+        if let Some(path) = payload.bitmap.as_deref() {
+            match build_bitmap(path)? {
+                Some(bitmap) => {
                     if SetClipboardData(CF_BITMAP as u32, bitmap as *mut core::ffi::c_void)
                         .is_null()
                     {
-                        // The file list already succeeded; dropping the pixel
-                        // format must not fail the whole copy.
+                        // The other formats already succeeded; dropping the
+                        // pixel format must not fail the whole copy.
                         DeleteObject(bitmap);
                     }
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    // File list succeeded but the pixel decode failed. Report the
-                    // decode problem because the user explicitly copied an image.
-                    return Err(error);
-                }
+                None => {}
             }
+        }
+        if !payload.marker.is_empty() {
+            let format = registered_format(SELF_MARKER_FORMAT);
+            if format == 0 {
+                return Err(AppError::message("无法注册 PicBoard 剪贴板标记"));
+            }
+            let json = serde_json::to_vec(&payload.marker)?;
+            set_global_bytes(format, &nul_terminated(&json))?;
         }
         Ok(())
     })
 }
 
-fn build_dropfiles(paths: &[std::path::PathBuf]) -> Result<HGLOBAL, AppError> {
+fn utf16_bytes(value: &str) -> Vec<u8> {
+    value
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+fn nul_terminated(bytes: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(bytes.len() + 1);
+    output.extend_from_slice(bytes);
+    output.push(0);
+    output
+}
+
+/// Hand `bytes` to the clipboard as one moveable global memory block.
+unsafe fn set_global_bytes(format: u32, bytes: &[u8]) -> Result<(), AppError> {
+    let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes.len().max(1));
+    if handle.is_null() {
+        return Err(AppError::message("无法分配剪贴板内存"));
+    }
+    let memory = GlobalLock(handle);
+    if memory.is_null() {
+        let _ = GlobalFree(handle);
+        return Err(AppError::message("无法锁定剪贴板内存"));
+    }
+    ptr::copy_nonoverlapping(bytes.as_ptr(), memory as *mut u8, bytes.len());
+    GlobalUnlock(handle);
+    if SetClipboardData(format, handle as *mut core::ffi::c_void).is_null() {
+        let _ = GlobalFree(handle);
+        return Err(AppError::message("无法写入剪贴板数据"));
+    }
+    Ok(())
+}
+
+fn build_dropfiles(paths: &[PathBuf]) -> Result<HGLOBAL, AppError> {
     let mut wide: Vec<u16> = Vec::new();
     for path in paths {
         let normalized = path.to_string_lossy().replace('/', "\\");
@@ -1250,3 +1442,4 @@ mod tests {
         assert_eq!(&rgba[4..8], &[0, 255, 0, 255]);
     }
 }
+

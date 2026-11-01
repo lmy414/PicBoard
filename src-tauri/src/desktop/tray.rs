@@ -1,17 +1,15 @@
-//! System tray icon with 打开画板 / 收起 / 完全退出 actions.
+//! System tray icon.
 //!
-//! Events raised here are emitted to the renderer through the shared event
-//! contract (`window:expanded-changed`) so React stays authoritative for
-//! expanded state and no invoke round-trip loop is created.
+//! LEFT click toggles the tray flyout panel (anchored to the clicked icon);
+//! RIGHT click opens the native menu with 打开 PicBoard / 退出.
 
 use crate::error::AppError;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
-const TRAY_ID: &str = "quick-image-board-tray";
+const TRAY_ID: &str = "picboard-tray";
 const MENU_OPEN: &str = "tray-open";
-const MENU_COLLAPSE: &str = "tray-collapse";
 const MENU_QUIT: &str = "tray-quit";
 
 /// Build and attach the tray icon. Called once at startup.
@@ -21,17 +19,11 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
         .cloned()
         .ok_or_else(|| AppError::message("缺少托盘图标"))?;
 
-    let open = MenuItem::with_id(app, MENU_OPEN, "打开画板", true, None::<&str>)?;
-    let collapse = MenuItem::with_id(app, MENU_COLLAPSE, "显示悬浮球", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "完全退出", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, MENU_OPEN, "打开 PicBoard", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[
-            &open,
-            &collapse,
-            &PredefinedMenuItem::separator(app)?,
-            &quit,
-        ],
+        &[&open, &PredefinedMenuItem::separator(app)?, &quit],
     )?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
@@ -41,67 +33,61 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
         .show_menu_on_left_click(false);
 
     builder = builder.on_menu_event(move |handle, event| {
-        if event.id() == MENU_QUIT {
-            handle.exit(0);
-        } else if event.id() == MENU_OPEN || event.id() == MENU_COLLAPSE {
-            let expanded = event.id() == MENU_OPEN;
-            let result = (|| -> Result<(), AppError> {
-                let window = handle
-                    .get_webview_window("main")
-                    .ok_or_else(|| AppError::message("主窗口不存在"))?;
-                if let Some(readiness) =
-                    handle.try_state::<crate::startup_readiness::StartupReadiness>()
-                {
-                    readiness.mark_user_shown();
+        // Tray menu events arrive inside a shell COM callback: defer the
+        // window APIs to a worker thread.
+        let handle = handle.clone();
+        let action = if event.id() == MENU_QUIT {
+            Some(false)
+        } else if event.id() == MENU_OPEN {
+            Some(true)
+        } else {
+            None
+        };
+        if let Some(open) = action {
+            crate::platform::spawn_worker("picboard-tray-menu", move || {
+                if open {
+                    if let Err(error) = show_main(&handle) {
+                        eprintln!("[tray] open failed: {error}");
+                    }
+                } else {
+                    handle.exit(0);
                 }
-                window.show()?;
-                handle
-                    .state::<crate::window_controller::WindowController>()
-                    .start_cursor_tracking();
-                if expanded {
-                    window.set_focus()?;
-                }
-                // Resize the native window first, then tell the renderer. React
-                // only listens; it never re-invokes, so no event recursion.
-                crate::window_controller::set_window_expanded_state(handle, expanded)?;
-                Ok(())
-            })();
-            if let Err(error) = result {
-                eprintln!("[tray] action failed: {error}");
-            }
+            });
         }
     });
 
-    let open_app2 = app.clone();
+    let toggle_app = app.clone();
     builder = builder.on_tray_icon_event(move |_tray, event| {
-        // Left-click (single) on the tray opens the board; right-click shows the
-        // context menu (Tauri default on Windows).
-        if let TrayIconEvent::Click {
-            button: MouseButton::Left,
-            button_state: MouseButtonState::Up,
-            ..
-        } = event
-        {
-            let result = (|| -> Result<(), AppError> {
-                let window = open_app2
-                    .get_webview_window("main")
-                    .ok_or_else(|| AppError::message("主窗口不存在"))?;
-                if let Some(readiness) =
-                    open_app2.try_state::<crate::startup_readiness::StartupReadiness>()
-                {
-                    readiness.mark_user_shown();
-                }
-                window.show()?;
-                open_app2
+        // Tray click events arrive inside a shell COM callback: the toggle
+        // (which calls window APIs) is deferred to a worker thread, and the
+        // physical icon rect is copied out of the event first. The tray rect
+        // is documented in physical pixels.
+        let click = match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                rect:
+                    tauri::Rect {
+                        position: tauri::Position::Physical(position),
+                        size: tauri::Size::Physical(size),
+                    },
+                ..
+            } => Some((
+                f64::from(position.x),
+                f64::from(position.y),
+                f64::from(size.width),
+                f64::from(size.height),
+            )),
+            _ => None,
+        };
+        if let Some((icon_x, icon_y, icon_width, icon_height)) = click {
+            // `State` borrows from the app handle; move the handle instead.
+            let handle = toggle_app.clone();
+            crate::platform::spawn_worker("picboard-tray-click", move || {
+                handle
                     .state::<crate::window_controller::WindowController>()
-                    .start_cursor_tracking();
-                window.set_focus()?;
-                crate::window_controller::set_window_expanded_state(&open_app2, true)?;
-                Ok(())
-            })();
-            if let Err(error) = result {
-                eprintln!("[tray] open failed: {error}");
-            }
+                    .toggle_tray_panel_at(icon_x, icon_y, icon_width, icon_height);
+            });
         }
     });
 
@@ -109,9 +95,6 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Emit the expanded-state change to the renderer (Tauri event name matches
-/// the contract: `window:expanded-changed`).
-pub fn emit_expanded(app: &AppHandle, expanded: bool) -> Result<(), AppError> {
-    app.emit("window:expanded-changed", expanded)?;
-    Ok(())
+fn show_main(handle: &AppHandle) -> Result<(), AppError> {
+    handle.state::<crate::window_controller::WindowController>().show_main_window(handle, None)
 }

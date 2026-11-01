@@ -14,15 +14,6 @@ function branchBetween(text, start, end) {
   return text.slice(from, to);
 }
 
-function assertOrdered(text, labels) {
-  let cursor = -1;
-  for (const label of labels) {
-    const next = text.indexOf(label);
-    assert.ok(next > cursor, `${label} must appear after the previous operation`);
-    cursor = next;
-  }
-}
-
 test("only the Rust/Tauri desktop route remains executable", async () => {
   const pkg = JSON.parse(await source("package.json"));
   assert.equal(pkg.main, undefined);
@@ -45,84 +36,155 @@ test("only the Rust/Tauri desktop route remains executable", async () => {
   }
 });
 
-test("native lifecycle keeps UI teardown non-blocking and close operations ordered", async () => {
+test("window teardown stays non-blocking and close operations stay ordered", async () => {
   const lib = await source("src-tauri/src/lib.rs");
   const destroyed = branchBetween(lib, "WindowEvent::Destroyed", "// Intercept close requests");
   assert.match(destroyed, /request_teardown\(\)/);
-  assert.doesNotMatch(destroyed, /\.join\(|cancel_drag\(\)|stop_cursor_tracking\(\)/);
+  assert.doesNotMatch(destroyed, /\.join\(|stop_cursor_tracking\(\)|start_cursor_tracking\(\)/);
 
   const host = await source("src-tauri/src/desktop/host.rs");
-  const floatBranch = branchBetween(host, "CloseBehavior::Float =>", "CloseBehavior::Tray =>");
-  assertOrdered(floatBranch, [".cancel_drag()", "set_window_expanded_state(app, false)", "window.show()"]);
-  assert.doesNotMatch(floatBranch, /stop_cursor_tracking/);
+  const trayBranch = host.slice(host.indexOf("CloseBehavior::Tray =>"));
+  assert.match(trayBranch, /mark_user_hidden\("main"\)/);
+  assert.match(trayBranch, /window\.hide\(\)\?/);
+  assert.doesNotMatch(trayBranch, /cancel_drag|stop_cursor_tracking|set_window_expanded_state|app\.exit/);
 
-  const trayBranch = branchBetween(host, "CloseBehavior::Tray =>", "\n        }");
-  assertOrdered(trayBranch, ["mark_user_hidden()", ".cancel_drag()", ".stop_cursor_tracking()", "set_window_expanded_state(app, false)", "window.hide()"]);
+  assert.match(host, /CloseBehavior::Quit => \{\s*app\.exit\(0\);/);
 });
 
-test("every tray show path restores cursor tracking", async () => {
-  const tray = await source("src-tauri/src/desktop/tray.rs");
-  const menuPath = branchBetween(tray, "builder = builder.on_menu_event", "let open_app2");
-  const clickPath = branchBetween(tray, "builder = builder.on_tray_icon_event", "builder.build(app)?");
-  for (const showPath of [menuPath, clickPath]) {
-    assertOrdered(showPath, ["mark_user_shown()", "window.show()?", "start_cursor_tracking()"]);
-  }
+test("main is a plain desktop window and the tray panel is a flyout", async () => {
+  const lib = await source("src-tauri/src/lib.rs");
+  const mainBuilder = branchBetween(lib, 'WebviewWindowBuilder::new(app, "main"', ".build()?");
+  assert.doesNotMatch(mainBuilder, /always_on_top\(true\)/);
+  assert.doesNotMatch(mainBuilder, /skip_taskbar\(true\)/);
+  assert.match(mainBuilder, /resizable\(true\)/);
+  assert.match(mainBuilder, /disable_drag_drop_handler\(\)/);
+
+  const trayUrl = branchBetween(lib, 'let tray_url =', 'WebviewWindowBuilder::new(app, "tray"');
+  assert.match(trayUrl, /surface=tray/);
+  const trayBuilder = branchBetween(lib, 'WebviewWindowBuilder::new(app, "tray"', ".build()?");
+  assert.match(trayBuilder, /always_on_top\(true\)/);
+  assert.match(trayBuilder, /skip_taskbar\(true\)/);
+  assert.match(trayBuilder, /resizable\(false\)/);
+  assert.match(trayBuilder, /visible\(false\)/);
+
+  // Tray flyout hides on focus loss.
+  const blur = branchBetween(lib, "tray_panel.on_window_event", "});");
+  assert.match(blur, /Focused\(false\)/);
+  assert.match(blur, /\.hide\(\)/);
 });
 
-test("drag end is idempotent, generation-scoped, and never joins on the interaction path", async () => {
+test("ball drag, cursor tracking and drag-in commands are gone", async () => {
   const controller = await source("src-tauri/src/window_controller.rs");
-  const start = branchBetween(controller, "pub fn start_window_drag", "/// End the custom drag");
-  const end = branchBetween(controller, "pub fn end_window_drag", "/// Start the 50ms cursor publisher");
-  assert.match(start, /drag_generation\.fetch_add\(1/);
-  assert.match(start, /drag_generation\.load\(Ordering::Acquire\) == generation/);
-  assert.match(end, /drag_generation\.fetch_add\(1/);
-  assert.match(end, /let was_active = self\.inner\.drag_active\.swap\(false/);
-  assert.match(end, /if !was_active/);
-  assert.match(end, /reap_thread\(thread\)/);
-  assert.doesNotMatch(end, /thread\.join\(\)/);
-  assertOrdered(end, ["drag_generation.fetch_add(1", "drag_active.swap(false", "reap_thread(thread)", "if !was_active", "self.start_cursor_tracking()"]);
-});
-
-test("cursor stop does not join a worker waiting for window messages", async () => {
-  const controller = await source("src-tauri/src/window_controller.rs");
-  const stop = branchBetween(controller, "pub fn stop_cursor_tracking", "/// Stop the drag loop");
-  assert.match(stop, /cursor_generation\.fetch_add\(1/);
-  assert.match(stop, /reap_thread\(thread\)/);
-  assert.doesNotMatch(stop, /thread\.join\(\)/);
-  const spawn = controller.slice(controller.indexOf("fn spawn_cursor_thread"));
-  assert.match(spawn, /cursor_generation\.load\(Ordering::Acquire\) == generation/);
-});
-
-test("renderer hydrates native expansion state before the first frame after reload", async () => {
-  const contract = await source("shared/image-board.ts");
-  assert.match(contract, /getExpanded\(\): Promise<boolean>/);
-
-  const adapter = await source("renderer/src/platform/tauri-adapter.ts");
-  assert.match(adapter, /getExpanded: \(\) => call<boolean>\("getExpanded"\)/);
+  assert.doesNotMatch(controller, /start_window_drag|end_window_drag|spawn_cursor_thread|window:cursor-position|place_initial|apply_expansion|set_expanded/);
 
   const commands = await source("src-tauri/src/commands.rs");
-  assert.match(commands, /pub fn get_expanded[\s\S]*window\.is_expanded\(\)/);
-
-  const main = await source("renderer/src/main.tsx");
-  const start = branchBetween(main, "async function start()", "\nvoid start();");
-  const hydration = branchBetween(start, "const initialExpanded", "requestAnimationFrame(");
-  assert.ok(start.indexOf("bootstrapImageBoard()") < start.indexOf("const initialExpanded"));
-  assertOrdered(hydration, [".getExpanded()", ".setExpanded(initialExpanded)", "root.render("]);
-  assert.match(hydration, /<App initialExpanded=\{initialExpanded\}/);
-
-  const app = await source("renderer/src/App.tsx");
-  assert.match(app, /function App\(\{ initialExpanded \}: \{ initialExpanded: boolean \}\)/);
-  assert.match(app, /useState<PanelPhase>\(initialExpanded \? "expanded" : "collapsed"\)/);
-  assert.match(app, /useRef<PanelPhase>\(initialExpanded \? "expanded" : "collapsed"\)/);
-  assert.match(app, /useRef\(initialExpanded\)/);
+  for (const gone of [
+    "pub fn get_expanded",
+    "pub fn set_expanded",
+    "pub fn start_window_drag",
+    "pub fn end_window_drag",
+    "pub fn import_images",
+    "pub fn import_text",
+  ]) {
+    assert.doesNotMatch(commands, new RegExp(gone.replace(/ /g, "\\s+")));
+  }
+  for (const present of [
+    "pub fn show_main_window",
+    "pub fn hide_tray_panel",
+    "pub fn minimize_window",
+    "pub fn quit_app",
+    "pub fn paste_clipboard",
+  ]) {
+    assert.match(commands, new RegExp(present.replace(/ /g, "\\s+")));
+  }
+  // The cursor position event is gone, but a main:navigate broadcast exists.
+  assert.doesNotMatch(controller, /window:cursor-position/);
+  assert.match(controller, /main:navigate/);
 });
 
-test("maximize preserves restore bounds and collapse restores first", async () => {
+test("mutating commands broadcast state-changed to all windows", async () => {
+  const commands = await source("src-tauri/src/commands.rs");
+  const broadcast = branchBetween(commands, "fn broadcast(", "let _ = app.emit(");
+  assert.ok(broadcast.length > 0);
+  const emitCount = (commands.match(/broadcast\(&app, /g) || []).length;
+  assert.ok(emitCount >= 15, `expected at least 15 broadcasts, found ${emitCount}`);
+  // Background capture and retention broadcast too (not window-scoped).
+  const monitor = await source("src-tauri/src/clipboard/monitor.rs");
+  assert.match(monitor, /app\.emit\(crate::STATE_CHANGED_EVENT/);
+  const retention = await source("src-tauri/src/retention.rs");
+  assert.match(retention, /app\.emit\(crate::STATE_CHANGED_EVENT/);
+});
+
+test("tray left click toggles the panel and the menu opens or quits", async () => {
+  const tray = await source("src-tauri/src/desktop/tray.rs");
+  const clickPath = branchBetween(tray, "on_tray_icon_event", "builder.build(app)?");
+  assert.match(clickPath, /MouseButton::Left/);
+  assert.match(clickPath, /toggle_tray_panel/);
+  assert.match(tray, /show_menu_on_left_click\(false\)/);
+  assert.match(tray, /打开 PicBoard/);
+  assert.match(tray, /退出/);
+  const menuPath = branchBetween(tray, "on_menu_event", "let toggle_app");
+  assert.match(menuPath, /MENU_OPEN/);
+  assert.match(menuPath, /show_main_window|show_main\(/);
+  assert.match(menuPath, /exit\(0\)/);
+});
+
+test("auto-start launches silently into the tray", async () => {
+  const autostart = await source("src-tauri/src/desktop/autostart.rs");
+  assert.match(autostart, /--autostart/);
+  const lib = await source("src-tauri/src/lib.rs");
+  assert.match(lib, /--autostart/);
+  assert.match(lib, /start_in_tray/);
+  // The on-page-load reveal is skipped entirely on an auto-start launch.
+  const pageLoad = branchBetween(lib, "on_page_load(move |_webview, payload|", ".build()?");
+  assert.match(pageLoad, /page_start_in_tray/);
+  assert.match(pageLoad, /if !page_start_in_tray \{/);
+  const setupReveal = branchBetween(lib, "if !start_in_tray {", "// Clean up background loops");
+  assert.match(setupReveal, /if !start_in_tray \{[\s\S]*?mark_placement_done\("main"\)/);
+});
+
+test("maximize preserves restore bounds and applies them with no lock held", async () => {
   const controller = await source("src-tauri/src/window_controller.rs");
-  const toggle = branchBetween(controller, "pub fn toggle_maximized", "/// Begin the custom drag");
-  assert.ok(toggle.includes("*restore = Some(current)"));
-  assert.ok(toggle.includes("set_logical_bounds(&win, work)?"));
-  assert.ok(toggle.includes("set_logical_bounds(&win, bounds)?"));
-  const expansion = controller.slice(controller.indexOf("fn apply_expansion("));
-  assert.ok(expansion.indexOf("controller.toggle_maximized()?") < expansion.indexOf("transition_window_expansion"));
+  const toggle = branchBetween(controller, "pub fn toggle_maximized", "pub fn start_titlebar_drag");
+  // The pre-maximize bounds are recorded before the window APIs run, and the
+  // restore rect is copied out before set_position/set_size; a re-entrant
+  // Resized/Moved event therefore never needs the restore mutex.
+  assert.ok(toggle.includes("begin_maximize(current)"));
+  assert.ok(toggle.includes("take_restore()"));
+  assert.ok(toggle.includes("set_logical_bounds(&win, work)"));
+  assert.ok(toggle.includes("set_logical_bounds(&win, bounds)"));
+  assert.doesNotMatch(toggle, /\.lock\(/);
+
+  const drag = branchBetween(controller, "pub fn start_titlebar_drag", "pub fn request_teardown");
+  assert.doesNotMatch(drag, /\.lock\(/);
+
+  // The window-event handler path is lock-free.
+  const handler = branchBetween(
+    controller,
+    "pub fn note_window_geometry_changed",
+    "pub fn is_maximized",
+  );
+  assert.match(handler, /should_schedule_save\(\)/);
+  assert.doesNotMatch(handler, /\.lock\(/);
+});
+
+test("window APIs are deferred out of window and tray callbacks", async () => {
+  const lib = await source("src-tauri/src/lib.rs");
+  const reveal = branchBetween(lib, "fn spawn_main_reveal", "fn setup_app");
+  assert.match(reveal, /spawn_worker\("picboard-main-reveal"/);
+  const blur = branchBetween(lib, "tray_panel.on_window_event", "});");
+  assert.match(blur, /spawn_worker\("picboard-tray-blur"/);
+
+  const tray = await source("src-tauri/src/desktop/tray.rs");
+  const menu = branchBetween(tray, "on_menu_event", "let toggle_app");
+  assert.match(menu, /spawn_worker\("picboard-tray-menu"/);
+  const click = branchBetween(tray, "on_tray_icon_event", "builder.build(app)?");
+  assert.match(click, /spawn_worker\("picboard-tray-click"/);
+
+  const host = await source("src-tauri/src/desktop/host.rs");
+  const close = branchBetween(host, "pub fn install_close_behavior", "/// Perform the close action");
+  // Only the flag runs in the callback; hiding/exit is deferred.
+  assert.match(close, /prevent_close\(\)/);
+  assert.match(close, /spawn_worker\("picboard-close-action"/);
+  assert.doesNotMatch(close, /\.hide\(\)|\.exit\(/);
 });

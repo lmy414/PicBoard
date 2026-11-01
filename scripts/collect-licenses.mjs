@@ -39,10 +39,27 @@ for (const pkg of metadata.packages) {
   }
   records.push({ ecosystem: 'Rust', name: pkg.name, version: pkg.version, license: pkg.license, repository: pkg.repository, directory: folder, files });
 }
-for (const name of ['react', 'react-dom', 'scheduler', '@tauri-apps/api']) {
-  const source = join(root, 'node_modules', name);
-  const pkg = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
+// The JavaScript set comes from the lockfile instead of a hand-kept list:
+// every installed `node_modules/...` entry npm did not mark dev-only, optional
+// entries included. Names are derived from the key, so scoped and nested
+// copies (`node_modules/a/node_modules/b`) resolve to their own package.
+// Optional platform packages that are not installed on this machine are
+// skipped rather than treated as an error.
+const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+const jsFolders = new Set();
+for (const key of Object.keys(lock.packages ?? {}).sort()) {
+  const entry = lock.packages[key];
+  if (!key.startsWith('node_modules/') || entry.dev === true || entry.link) continue;
+  const index = key.lastIndexOf('node_modules/');
+  if (index < 0) continue;
+  const name = key.slice(index + 'node_modules/'.length);
+  const source = join(root, key);
+  const manifest = join(source, 'package.json');
+  if (!existsSync(manifest)) continue;
+  const pkg = JSON.parse(readFileSync(manifest, 'utf8'));
   const folder = `js-${name.replaceAll('/', '-')}-${pkg.version}`;
+  if (jsFolders.has(folder)) continue;
+  jsFolders.add(folder);
   records.push({ ecosystem: 'JavaScript', name, version: pkg.version, license: pkg.license, directory: folder, files: collect(source, join(out, folder)) });
 }
 const bloub = join(root, 'renderer/src/third-party/bloub');

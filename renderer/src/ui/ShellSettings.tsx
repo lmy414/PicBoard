@@ -2,50 +2,25 @@
 //! component reads and updates host settings itself and owns its loading and
 //! failure handling. Compact layout for the Settings page.
 //!
-//! Host contract (native lane):
-//!   getDesktopSettings(): Promise<{ closeBehavior: 'float'|'tray'|'quit';
-//!                                    autoStart: boolean; autoStartAvailable: boolean }>
-//!   setDesktopSettings(patch): Promise<DesktopSettings>
-//!
 //! Three mutually-exclusive close-behavior choices plus an auto-start switch,
 //! shown only when the host reports it is available (dev builds never register
 //! auto-start). Every host result is applied from what the host actually
-//! persisted; nothing is faked. shared/image-board.ts is not extended yet
-//! (native lane owns it), so the host is reached through a locally-declared
-//! interface. No production stub ships: when the host methods are missing at
-//! runtime, this component shows its own error state only.
+//! persisted; nothing is faked. No production stub ships: when the host
+//! methods are missing at runtime, this component shows its own error state.
 
 import { useEffect, useRef, useState } from "react";
-import type { ImageBoardApi } from "../../../shared/image-board";
+import type { CloseBehavior, DesktopSettings, DesktopSettingsPatch, ImageBoardApi } from "../../../shared/image-board";
 import "./controls.css";
 
-export type CloseBehavior = "float" | "tray" | "quit";
+type HostWindow = Window & { imageBoard?: ImageBoardApi };
 
-export interface DesktopSettings {
-  closeBehavior: CloseBehavior;
-  autoStart: boolean;
-  autoStartAvailable: boolean;
-}
-
-/** Host surface this component relies on (contract with the native lane).
- *  Extends the declared imageBoard type so the runtime check plus cast stays
- *  honest: only the new methods are added locally until the shared type is
- *  extended by the native lane. */
-export interface DesktopHostApi extends ImageBoardApi {
-  getDesktopSettings(): Promise<DesktopSettings>;
-  setDesktopSettings(patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }): Promise<DesktopSettings>;
-}
-
-type HostWindow = Window & { imageBoard?: DesktopHostApi };
-
-/** The global imageBoard is declared with the pre-extension ImageBoardApi
- *  type; reaching the desktop methods requires the narrower host view. */
+/** Reached through the declared global so a host missing the desktop methods
+ *  is handled by this component instead of crashing the app. */
 const host = () => (window as unknown as HostWindow).imageBoard;
 
 const CLOSE_OPTIONS: Array<{ value: CloseBehavior; label: string; hint: string }> = [
-  { value: "float", label: "收起为悬浮球", hint: "关闭后保留小球" },
-  { value: "tray", label: "隐藏到托盘", hint: "进程和托盘保留" },
-  { value: "quit", label: "退出应用", hint: "结束全部进程" },
+  { value: "tray", label: "收纳到托盘", hint: "关闭后隐藏到系统托盘，可从托盘重新打开（默认）" },
+  { value: "quit", label: "退出程序", hint: "结束全部进程" },
 ];
 
 export function ShellSettings() {
@@ -80,7 +55,7 @@ export function ShellSettings() {
     setSettings(await api.getDesktopSettings());
   };
 
-  const update = async (patch: { closeBehavior?: CloseBehavior; autoStart?: boolean }) => {
+  const update = async (patch: DesktopSettingsPatch) => {
     const api = host();
     if (typeof api?.setDesktopSettings !== "function") {
       setLoadError("当前宿主未提供桌面设置接口");

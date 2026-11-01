@@ -1,9 +1,25 @@
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 
 export default defineConfig({
   plugins: [react()],
   base: "./",
+  test: {
+    include: ["tests/**/*.test.{ts,tsx}"],
+    // Git worktrees under .worktrees carry their own stale node_modules and
+    // test copies; vitest's path-filter matching would otherwise run them.
+    exclude: [...configDefaults.exclude, ".worktrees/**"],
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(process.cwd(), "index.html"),
+        orbDemo: resolve(process.cwd(), "orb-demo.html"),
+      },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

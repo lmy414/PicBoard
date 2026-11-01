@@ -193,7 +193,7 @@ export function Popover({
   };
   return createPortal(
     <div className="qib-popover-layer" style={{ left: place?.left ?? 0, top: place?.top ?? 0 }}>
-      <div {...merged}>{children}</div>
+      <div {...merged} data-esc-layer>{children}</div>
     </div>,
     document.body,
   );
