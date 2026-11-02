@@ -5,7 +5,7 @@ use super::*;
 use crate::clipboard::{CapturedContent, ClipboardCapture};
 use crate::dto::{
     AppState, CanvasFrame, CanvasNode, CanvasPoint, ContentBody, ContentKind, ContentSource,
-    ImportImagePayload, ImportViewport, NodeMove,
+    ImportImagePayload, ImportViewport, NewContentInput, NodeMove,
 };
 use crate::paths::safe_join;
 use std::fs;
@@ -50,6 +50,24 @@ fn no_bin() -> Arc<Mutex<Vec<PathBuf>>> {
 fn png_bytes(width: u32, height: u32) -> Vec<u8> {
     let rgba = vec![160u8; (width * height * 4) as usize];
     super::encode_png(&rgba, width, height).unwrap()
+}
+
+#[test]
+fn saving_image_copies_keeps_original_bytes_and_distinct_ids() {
+    let temp = TempDir::new().unwrap();
+    let mut store = storage(&temp, no_bin(), None);
+    let bytes = png_bytes(32, 24);
+    let first = store.save_image_copy("原图.png", &bytes).unwrap();
+    let second = store.save_image_copy("编辑副本.png", &bytes).unwrap();
+    assert_ne!(first.content_id, second.content_id);
+    assert_eq!(second.state.contents.len(), 2);
+    for id in [&first.content_id, &second.content_id] {
+        let image = store.resolve_image(id).unwrap();
+        assert_eq!(fs::read(image.path).unwrap(), bytes);
+    }
+    let before = store.load_state().unwrap();
+    assert!(store.save_image_copy("bad.png", b"invalid image").is_err());
+    assert_eq!(store.load_state().unwrap(), before);
 }
 
 /// Ingest one image content (no placement) and return its id.
@@ -861,6 +879,379 @@ fn child_cards_avoid_parent_nodes_and_sibling_cards() {
     assert!(items_overlap_free(&state));
 }
 
+
+// ---------------------------------------------------------------------------
+// Manual content creation (canvas new-node menu)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_content_node_creates_manual_text_rich_and_link_contents() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = storage(&temp, no_bin(), None);
+    let root = store.load_state().unwrap().active_canvas_id;
+
+    let text = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 400.0, y: 300.0 },
+            NewContentInput::Text,
+        )
+        .unwrap();
+    let text_record = &text.state.contents[&text.content_id];
+    assert_eq!(text_record.kind, ContentKind::Text);
+    assert_eq!(text_record.source, ContentSource::Manual);
+    assert_eq!(
+        store.get_content_body(&text.content_id).unwrap(),
+        ContentBody {
+            text: String::new(),
+            html: None
+        }
+    );
+    let text_node = text
+        .state
+        .canvases
+        .iter()
+        .flat_map(|canvas| &canvas.nodes)
+        .find(|node| node.id == text.node_id)
+        .expect("returned text node exists in the returned state");
+    assert_eq!(text_node.content_id, text.content_id);
+    let text_dir = temp.path().join("content").join(&text.content_id);
+    assert!(text_dir.join("text.txt").is_file());
+    assert!(!text_dir.join("content.html").exists());
+
+    let rich = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 800.0, y: 300.0 },
+            NewContentInput::RichText,
+        )
+        .unwrap();
+    let rich_record = &rich.state.contents[&rich.content_id];
+    assert_eq!(rich_record.kind, ContentKind::RichText);
+    assert_eq!(rich_record.source, ContentSource::Manual);
+    assert_eq!(
+        store.get_content_body(&rich.content_id).unwrap(),
+        ContentBody {
+            text: String::new(),
+            html: Some("<p></p>".into())
+        }
+    );
+    let rich_node = rich
+        .state
+        .canvases
+        .iter()
+        .flat_map(|canvas| &canvas.nodes)
+        .find(|node| node.id == rich.node_id)
+        .expect("returned rich node exists in the returned state");
+    assert_eq!(rich_node.content_id, rich.content_id);
+    let rich_dir = temp.path().join("content").join(&rich.content_id);
+    assert_eq!(fs::read_to_string(rich_dir.join("text.txt")).unwrap(), "");
+    assert_eq!(
+        fs::read_to_string(rich_dir.join("content.html")).unwrap(),
+        "<p></p>"
+    );
+
+    let link = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 1200.0, y: 300.0 },
+            NewContentInput::Link {
+                url: " https://example.com/a ".into(),
+            },
+        )
+        .unwrap();
+    let link_record = &link.state.contents[&link.content_id];
+    assert_eq!(link_record.kind, ContentKind::Link);
+    assert_eq!(link_record.source, ContentSource::Manual);
+    assert_eq!(link_record.url.as_deref(), Some("https://example.com/a"));
+    assert_eq!(link_record.preview, "https://example.com/a");
+    assert_eq!(link_record.text_length, 0);
+    assert_eq!(
+        store.get_content_body(&link.content_id).unwrap(),
+        ContentBody {
+            text: "https://example.com/a".into(),
+            html: None
+        }
+    );
+    let link_node = link
+        .state
+        .canvases
+        .iter()
+        .flat_map(|canvas| &canvas.nodes)
+        .find(|node| node.id == link.node_id)
+        .expect("returned link node exists in the returned state");
+    assert_eq!(link_node.content_id, link.content_id);
+    // Links own no body files.
+    assert!(!temp.path().join("content").join(&link.content_id).exists());
+}
+
+#[test]
+fn consecutive_empty_rich_text_creations_are_independent_contents() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = storage(&temp, no_bin(), None);
+    let root = store.load_state().unwrap().active_canvas_id;
+
+    let first = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 300.0, y: 300.0 },
+            NewContentInput::RichText,
+        )
+        .unwrap();
+    let second = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 900.0, y: 300.0 },
+            NewContentInput::RichText,
+        )
+        .unwrap();
+
+    assert_ne!(first.content_id, second.content_id);
+    assert_ne!(first.node_id, second.node_id);
+    assert_eq!(second.state.contents.len(), 2);
+    for content_id in [&first.content_id, &second.content_id] {
+        assert_eq!(
+            second.state.contents[content_id].kind,
+            ContentKind::RichText
+        );
+        assert_eq!(
+            second.state.contents[content_id].source,
+            ContentSource::Manual
+        );
+        assert_eq!(
+            store.get_content_body(content_id).unwrap(),
+            ContentBody {
+                text: String::new(),
+                html: Some("<p></p>".into())
+            }
+        );
+    }
+    assert_eq!(all_nodes(&second.state).len(), 2);
+}
+
+#[test]
+fn manual_contents_and_nodes_survive_storage_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let (root, text, rich, link) = {
+        let mut store = storage(&temp, no_bin(), None);
+        let root = store.load_state().unwrap().active_canvas_id;
+        let text = store
+            .create_content_node(
+                &root,
+                CanvasPoint { x: 300.0, y: 300.0 },
+                NewContentInput::Text,
+            )
+            .unwrap();
+        let rich = store
+            .create_content_node(
+                &root,
+                CanvasPoint { x: 700.0, y: 300.0 },
+                NewContentInput::RichText,
+            )
+            .unwrap();
+        let link = store
+            .create_content_node(
+                &root,
+                CanvasPoint { x: 1100.0, y: 300.0 },
+                NewContentInput::Link {
+                    url: "https://example.com/persisted".into(),
+                },
+            )
+            .unwrap();
+        (root, text, rich, link)
+    };
+
+    let mut reopened = storage(&temp, no_bin(), None);
+    let state = reopened.load_state().unwrap();
+    let root_canvas = state
+        .canvases
+        .iter()
+        .find(|canvas| canvas.id == root)
+        .expect("root canvas survives reopen");
+    assert_eq!(root_canvas.nodes.len(), 3);
+
+    for created in [&text, &rich, &link] {
+        assert_eq!(
+            state.contents[&created.content_id].source,
+            ContentSource::Manual
+        );
+        assert!(
+            root_canvas
+                .nodes
+                .iter()
+                .any(|node| node.id == created.node_id
+                    && node.content_id == created.content_id),
+            "node {} still references content {}",
+            created.node_id,
+            created.content_id
+        );
+    }
+    assert_eq!(state.contents[&text.content_id].kind, ContentKind::Text);
+    assert_eq!(state.contents[&rich.content_id].kind, ContentKind::RichText);
+    assert_eq!(state.contents[&link.content_id].kind, ContentKind::Link);
+    assert_eq!(
+        state.contents[&link.content_id].url.as_deref(),
+        Some("https://example.com/persisted")
+    );
+    assert_eq!(
+        reopened.get_content_body(&text.content_id).unwrap(),
+        ContentBody {
+            text: String::new(),
+            html: None
+        }
+    );
+    assert_eq!(
+        reopened.get_content_body(&rich.content_id).unwrap(),
+        ContentBody {
+            text: String::new(),
+            html: Some("<p></p>".into())
+        }
+    );
+    assert_eq!(
+        reopened.get_content_body(&link.content_id).unwrap(),
+        ContentBody {
+            text: "https://example.com/persisted".into(),
+            html: None
+        }
+    );
+}
+
+#[test]
+fn create_content_node_rejects_invalid_input_without_side_effects() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = storage(&temp, no_bin(), None);
+    let root = store.load_state().unwrap().active_canvas_id;
+    let before = store.load_state().unwrap();
+    let state_json_before = fs::read_to_string(temp.path().join("state.json")).unwrap();
+    let content_files_before = fs::read_dir(temp.path().join("content")).unwrap().count();
+
+    for url in [
+        "",
+        "not a url",
+        "ftp://example.com/file",
+        "https://",
+    ] {
+        assert!(
+            store
+                .create_content_node(
+                    &root,
+                    CanvasPoint { x: 400.0, y: 300.0 },
+                    NewContentInput::Link { url: url.into() },
+                )
+                .is_err(),
+            "link {url:?} must be rejected"
+        );
+    }
+    for center in [
+        CanvasPoint {
+            x: f64::NAN,
+            y: 300.0,
+        },
+        CanvasPoint {
+            x: 400.0,
+            y: f64::INFINITY,
+        },
+    ] {
+        assert!(
+            store
+                .create_content_node(&root, center, NewContentInput::RichText)
+                .is_err(),
+            "center {center:?} must be rejected"
+        );
+    }
+    assert!(store
+        .create_content_node(
+            "missing-canvas",
+            CanvasPoint { x: 400.0, y: 300.0 },
+            NewContentInput::Text,
+        )
+        .is_err());
+
+    assert_eq!(store.load_state().unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(temp.path().join("state.json")).unwrap(),
+        state_json_before
+    );
+    assert_eq!(
+        fs::read_dir(temp.path().join("content")).unwrap().count(),
+        content_files_before
+    );
+    assert!(before.contents.is_empty());
+    assert!(all_nodes(&before).is_empty());
+}
+
+#[test]
+fn create_content_node_rolls_back_when_the_state_write_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = storage(&temp, no_bin(), None);
+    let root = store.load_state().unwrap().active_canvas_id;
+    let before = store.load_state().unwrap();
+    let state_json_before = fs::read_to_string(temp.path().join("state.json")).unwrap();
+    // A directory at the backup path makes the next publish fail after the
+    // content files and the node have already been prepared.
+    fs::create_dir(temp.path().join("state.json.bak")).unwrap();
+
+    assert!(store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 300.0, y: 300.0 },
+            NewContentInput::RichText,
+        )
+        .is_err());
+
+    assert_eq!(store.load_state().unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(temp.path().join("state.json")).unwrap(),
+        state_json_before
+    );
+    assert!(all_nodes(store.state_ref()).is_empty());
+    assert!(store.state_ref().contents.is_empty());
+    assert_eq!(
+        fs::read_dir(temp.path().join("content")).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn create_content_node_snaps_to_grid_and_avoids_existing_items() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = storage(&temp, no_bin(), None);
+    // Snapping is off by default; assert the grid mode explicitly.
+    store.set_layout_settings(true, 24);
+    let root = store.load_state().unwrap().active_canvas_id;
+
+    let first = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 151.0, y: 53.0 },
+            NewContentInput::Text,
+        )
+        .unwrap();
+    let first_node = node_for(&first.state, &first.content_id);
+    assert_eq!(
+        (first_node.x % 24.0, first_node.y % 24.0),
+        (0.0, 0.0)
+    );
+    let first_rect = rect_of(first_node);
+
+    // The same proposal must be relocated clear of the first node, and both
+    // positions stay on the lattice. The exact replacement spot is owned by
+    // the shared layout resolver, not duplicated here.
+    let second = store
+        .create_content_node(
+            &root,
+            CanvasPoint { x: 151.0, y: 53.0 },
+            NewContentInput::Text,
+        )
+        .unwrap();
+    let second_node = node_for(&second.state, &second.content_id);
+    assert!(!first_rect.collides(rect_of(second_node)));
+    assert!(!overlaps_any(&second.state));
+    assert_eq!(
+        (second_node.x % 24.0, second_node.y % 24.0),
+        (0.0, 0.0)
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Multi-reference content, cascades, edges, dedupe, retention (capture flow)

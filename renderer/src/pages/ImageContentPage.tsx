@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ContentRecord } from "../../../shared/image-board";
 import { formatByteSize } from "../content/content-meta";
 import { easeOutCubic } from "../ui/motion";
@@ -36,7 +37,7 @@ interface DragState {
  * double-click fit ↔ 100%. Gestures write the transform and the zoom label
  * straight to the DOM; no React state updates per frame.
  */
-export function ImageContentPage({ content, onError }: { content: ContentRecord; onError(message: string): void }) {
+export function ImageContentPage({ content, onError, toolbarHost }: { content: ContentRecord; onError(message: string): void; toolbarHost?: HTMLElement | null }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<View>({ scale: 1, x: 0, y: 0 });
@@ -349,9 +350,20 @@ export function ImageContentPage({ content, onError }: { content: ContentRecord;
         ? `${image.width} × ${image.height}`
         : "尺寸未知";
 
+  const zoomToolbar = (
+    <div className={`cp-image-toolbar${toolbarHost !== undefined ? " is-topbar" : ""}`} role="toolbar" aria-label="图片缩放">
+      <button type="button" title="缩小" aria-label="缩小" onClick={() => zoomBy(1 / ZOOM_STEP)}><IconMinus size={15} /></button>
+      <span ref={percentLabelRef} className="cp-image-percent">{Math.round(viewRef.current.scale * 100)}%</span>
+      <button type="button" title="放大" aria-label="放大" onClick={() => zoomBy(ZOOM_STEP)}><IconPlus size={15} /></button>
+      <span className="cp-image-toolbar-separator" />
+      <button type="button" title="适应窗口" aria-label="适应窗口" onClick={fitToScreen}><IconFit size={15} /><span>适应</span></button>
+      <button type="button" title="原始大小" aria-label="原始大小" onClick={showActualSize}>1:1</button>
+    </div>
+  );
+
   return (
     <div className="cp-image-page">
-      <div className="cp-image-meta">
+      {toolbarHost === undefined && <div className="cp-image-meta">
         <span className="cp-image-name" title={image?.fileName ?? content.preview}>
           {image?.fileName ?? content.preview}
         </span>
@@ -363,7 +375,7 @@ export function ImageContentPage({ content, onError }: { content: ContentRecord;
             <span>{formatByteSize(image.byteSize)}</span>
           </>
         ) : null}
-      </div>
+      </div>}
       <div
         ref={viewportRef}
         className={`cp-image-viewport${dragging ? " is-dragging" : ""}`}
@@ -380,7 +392,7 @@ export function ImageContentPage({ content, onError }: { content: ContentRecord;
           style={{ width: natural.width || 1, height: natural.height || 1 }}
         >
           <img
-            className="cp-image"
+            className={`cp-image${loaded ? " is-loaded" : ""}`}
             src={imageUrl}
             alt={image?.fileName ?? "图片"}
             draggable={false}
@@ -397,25 +409,7 @@ export function ImageContentPage({ content, onError }: { content: ContentRecord;
           </div>
         ) : null}
       </div>
-      <div className="cp-image-toolbar" role="toolbar" aria-label="图片缩放">
-        <button type="button" title="缩小" aria-label="缩小" onClick={() => zoomBy(1 / ZOOM_STEP)}>
-          <IconMinus size={15} />
-        </button>
-        <span ref={percentLabelRef} className="cp-image-percent">
-          100%
-        </span>
-        <button type="button" title="放大" aria-label="放大" onClick={() => zoomBy(ZOOM_STEP)}>
-          <IconPlus size={15} />
-        </button>
-        <span className="cp-image-toolbar-separator" />
-        <button type="button" title="适应窗口" aria-label="适应窗口" onClick={fitToScreen}>
-          <IconFit size={15} />
-          <span>适应</span>
-        </button>
-        <button type="button" title="原始大小" aria-label="原始大小" onClick={showActualSize}>
-          1:1
-        </button>
-      </div>
+      {toolbarHost ? createPortal(zoomToolbar, toolbarHost) : toolbarHost === undefined ? zoomToolbar : null}
     </div>
   );
 }

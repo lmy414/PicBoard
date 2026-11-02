@@ -6,7 +6,8 @@
 use crate::clipboard::{CapturedContent, ClipboardCapture};
 use crate::dto::{
     AppState, CanvasFrame, CanvasNode, CanvasPoint, CanvasViewport, CategoryRecord, ContentBody,
-    ContentKind, ContentSource, EdgeRecord, ImportViewport, NodeMove,
+    ContentKind, ContentSource, CreateContentNodeResult, EdgeRecord, ImportViewport,
+    NewContentInput, NodeMove,
 };
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
@@ -29,10 +30,26 @@ use super::{DeleteJournal, DeleteJournalEntry, ImageBoardStorage, JOURNAL_VERSIO
 
 /// Upper bound for one text field written through `update_text_content`.
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+/// Initial body of a new rich-text content: an empty paragraph keeps the
+/// content `richText` before the first character is typed.
+const EMPTY_RICH_HTML: &str = "<p></p>";
 /// Offset applied to each content placed from a PicBoard self-marker paste.
 const MARKER_CASCADE: f64 = 28.0;
 
 impl ImageBoardStorage {
+    /// Save a new independent image using the same transactional file ingestion.
+    pub fn save_image_copy(&mut self, name: &str, bytes: &[u8]) -> Result<crate::dto::ImageOpenResult, AppError> {
+        crate::image_files::validate_image(bytes)?;
+        self.ensure_loaded()?;
+        let before = self.snapshot()?;
+        let ingested = self.create_image(Some(name), bytes, ContentSource::Manual)?;
+        if let Err(error) = self.write_state() {
+            self.state = Some(before);
+            ingest::rollback_files(&ingested.files);
+            return Err(error);
+        }
+        Ok(crate::dto::ImageOpenResult { state: self.snapshot()?, content_id: ingested.id })
+    }
     // -----------------------------------------------------------------
     // Imports and clipboard ingestion
     // -----------------------------------------------------------------
@@ -181,6 +198,65 @@ impl ImageBoardStorage {
             return Err(error);
         }
         self.snapshot()
+    }
+
+    /// Create a fresh content from the canvas new-node menu and place its first
+    /// node, centered on `center`. Manual creation never reuses an existing
+    /// content; a failed placement or state write leaves neither a content nor
+    /// a node behind.
+    pub fn create_content_node(
+        &mut self,
+        canvas_id: &str,
+        center: CanvasPoint,
+        input: NewContentInput,
+    ) -> Result<CreateContentNodeResult, AppError> {
+        self.ensure_loaded()?;
+        let canvas_index = self.canvas_index(canvas_id)?;
+        if !center.x.is_finite() || !center.y.is_finite() {
+            return Err(AppError::message("节点坐标无效"));
+        }
+        let (kind, text, html, url) = match input {
+            NewContentInput::Text => (ContentKind::Text, String::new(), None, None),
+            NewContentInput::RichText => (
+                ContentKind::RichText,
+                String::new(),
+                Some(EMPTY_RICH_HTML.to_owned()),
+                None,
+            ),
+            NewContentInput::Link { url } => {
+                let url = crate::clipboard::validate_url(&url)?;
+                (ContentKind::Link, url.clone(), None, Some(url))
+            }
+        };
+        let before = self.snapshot()?;
+        let mut created: Vec<PathBuf> = Vec::new();
+        let result = (|| -> Result<(String, String), AppError> {
+            let ingested = self.create_text_like(kind, text, html, url, ContentSource::Manual)?;
+            created = ingested.files;
+            self.push_centered_node(canvas_index, &ingested.id, center.x, center.y)?;
+            // Placement appends exactly one node; return that node's id.
+            let node_id = self.state_ref().canvases[canvas_index]
+                .nodes
+                .last()
+                .expect("placement appends a node")
+                .id
+                .clone();
+            self.write_state()?;
+            Ok((ingested.id, node_id))
+        })();
+        let (content_id, node_id) = match result {
+            Ok(created_ids) => created_ids,
+            Err(error) => {
+                self.state = Some(before);
+                ingest::rollback_files(&created);
+                return Err(error);
+            }
+        };
+        Ok(CreateContentNodeResult {
+            state: self.snapshot()?,
+            content_id,
+            node_id,
+        })
     }
 
     // -----------------------------------------------------------------

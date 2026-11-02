@@ -18,12 +18,14 @@ import type {
   CanvasViewport,
   ContentAsset,
   ContentBody,
+  CreateContentNodeResult,
   DesktopSettings,
   DesktopSettingsPatch,
   ImageBoardApi,
   ImportImagePayload,
   ImportViewport,
   MainNavigation,
+  NewContentInput,
   NodeMove,
   PluginListing,
 } from "../../../shared/image-board";
@@ -72,12 +74,22 @@ function subscribe<T>(event: string, listener: (payload: T) => void): () => void
 
 export function createTauriAdapter(): ImageBoardApi {
   return {
+    readImage: (contentId) => call("read_image", { contentId }),
+    saveImageCopy: (image) => call("save_image_copy", { image }),
+    exportImage: (image) => call("export_image", { image }),
+    openImageFile: () => call("open_image_file"),
+    takePendingImage: () => call("take_pending_image"),
+    onImageOpened: (listener) => subscribe("image:opened", listener),
+    getImageAssociation: () => call("get_image_association"),
+    configureImageAssociation: () => call("configure_image_association"),
     loadState: () => call<AppState>("load_state"),
     onStateChanged: (listener) => subscribe<AppState>("state-changed", listener),
     pasteClipboard: (canvasId: string, viewport?: ImportViewport) =>
       call<{ state: AppState; placed: boolean }>("paste_clipboard", { canvasId, viewport }),
     placeContent: (contentId: string, canvasId: string, center: CanvasPoint) =>
       call<AppState>("place_content", { contentId, canvasId, center }),
+    createContentNode: (canvasId: string, center: CanvasPoint, input: NewContentInput) =>
+      call<CreateContentNodeResult>("create_content_node", { canvasId, center, input }),
     setActiveCanvas: (canvasId: string) => call<AppState>("set_active_canvas", { canvasId }),
     setCanvasViewport: (canvasId: string, viewport: CanvasViewport) =>
       call<AppState>("set_canvas_viewport", { canvasId, viewport }),

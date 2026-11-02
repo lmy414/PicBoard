@@ -1,4 +1,5 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { AppState, ContentKind, ContentRecord } from "../../../shared/image-board";
 import { KIND_LABEL, KIND_ORDER, buildPlacementIndex, contentTitle, matchesQuery, relativeTime } from "../content/content-meta";
@@ -10,6 +11,7 @@ import "./library.css";
 
 export interface LibraryViewProps {
   state: AppState;
+  toolbarHost?: HTMLElement | null;
   selectedIds: string[];
   onSelect(contentId: string, toggle: boolean): void;
   onClearSelection(): void;
@@ -303,10 +305,8 @@ export function LibraryView(props: LibraryViewProps) {
     setTime("all");
   };
 
-  return (
-    <CardActionsContext.Provider value={actions}>
-      <section className="lib-view" aria-label="分类库">
-        <div className="lib-toolbar">
+  const toolbar = (
+        <div className="lib-toolbar" role="toolbar" aria-label="分类库工具">
           <div className="lib-toolbar-row">
             <div className="lib-search">
               <IconSearch size={14} />
@@ -388,8 +388,6 @@ export function LibraryView(props: LibraryViewProps) {
                 <IconChevronDown size={12} />
               </span>
             </div>
-          </div>
-
           <div className="lib-summary">
             <span>
               {filtersActive ? `筛选出 ${filtered.length} 项 · 共 ${allContents.length} 项` : `共 ${allContents.length} 项`}
@@ -397,13 +395,21 @@ export function LibraryView(props: LibraryViewProps) {
             {selectedIds.length > 0 ? (
               <span className="lib-selection">
                 已选 {selectedIds.length} 项
+                <button type="button" aria-label="操作选中内容" onClick={(event) => props.onQuickActions(event, selectedIds[0])}>操作</button>
                 <button type="button" onClick={props.onClearSelection}>
                   清除选择
                 </button>
               </span>
             ) : null}
           </div>
+          </div>
         </div>
+  );
+
+  return (
+    <CardActionsContext.Provider value={actions}>
+      <section className="lib-view" aria-label="分类库">
+        {props.toolbarHost ? createPortal(toolbar, props.toolbarHost) : props.toolbarHost === undefined ? toolbar : null}
 
         <div className="lib-body">
         {showGrid ? (

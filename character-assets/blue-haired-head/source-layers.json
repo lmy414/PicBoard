@@ -1,0 +1,105 @@
+{
+  "source": "../source-reference.png",
+  "canvas": [
+    1254,
+    1254
+  ],
+  "provenance": "Every visible pixel comes from the supplied source image. No new face, eye, or hair pixels are drawn.",
+  "cropCompletion": "none; the source canvas already clips hair at its edges, and those hidden pixels are not guessed.",
+  "layers": [
+    {
+      "id": "eye-left",
+      "file": "eye-left.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "eye-right",
+      "file": "eye-right.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "face",
+      "file": "face.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "hair-crown",
+      "file": "hair-crown.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "hair-side-left",
+      "file": "hair-side-left.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "hair-fringe-left",
+      "file": "hair-fringe-left.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "hair-fringe-right",
+      "file": "hair-fringe-right.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "hair-side-right",
+      "file": "hair-side-right.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "hair-tips-lower",
+      "file": "hair-tips-lower.png",
+      "provenance": "extracted",
+      "canvas": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "id": "source-support",
+      "file": "source-support.png",
+      "provenance": "extracted-remainder",
+      "canvas": [
+        1254,
+        1254
+      ]
+    }
+  ],
+  "limitations": [
+    "Only the original open-eye appearance exists in the source; alternate eye expressions require additional source artwork.",
+    "The source is partitioned into disjoint aligned pixel masks. Moving a cutout can expose transparent gaps where the original did not contain hidden pixels."
+  ]
+}

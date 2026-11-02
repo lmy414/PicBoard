@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "my-character",
+  "name": "My Character",
+  "canvas": { "width": 512, "height": 512, "headAnchor": [256, 276] },
+  "layers": {
+    "hairBack": { "file": "layers/hair-back.png", "z": 10, "provenance": "extracted" },
+    "head": { "file": "layers/head.png", "z": 20, "provenance": "extracted" },
+    "eyesOpen": { "file": "layers/eyes-open.png", "z": 30, "provenance": "extracted" },
+    "mouthNeutral": { "file": "layers/mouth-neutral.png", "z": 40, "provenance": "extracted" },
+    "mouthOpen": { "file": "layers/mouth-open.png", "z": 41, "provenance": "reconstructed" },
+    "hairFront": { "file": "layers/hair-front.png", "z": 50, "provenance": "extracted" }
+  },
+  "states": {
+    "idle": ["hairBack", "head", "eyesOpen", "mouthNeutral", "hairFront"],
+    "dragged": ["hairBack", "head", "eyesOpen", "mouthNeutral", "hairFront"],
+    "receiving": ["hairBack", "head", "eyesOpen", "mouthOpen", "hairFront"]
+  },
+  "motion": {
+    "idle": { "swayDeg": 2, "bobPx": 2, "blinkIntervalSec": [2.5, 5.5] },
+    "dragged": { "tiltDeg": 10, "squash": 0.12, "spring": 0.72, "damping": 0.78 },
+    "receiving": { "squash": 0.18, "spring": 0.8, "damping": 0.72 }
+  }
+}

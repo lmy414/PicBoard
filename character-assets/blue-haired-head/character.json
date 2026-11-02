@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "blue-haired-head",
+  "name": "Blue-haired Head (source cuts)",
+  "source": "source-reference.png",
+  "canvas": {
+    "width": 1254,
+    "height": 1254,
+    "headAnchor": [627, 627]
+  },
+  "layerManifest": "source-layers.json",
+  "runtime": "../../renderer/src/OrbDemo.tsx",
+  "states": {
+    "idle": ["source-support", "face", "eye-left", "eye-right", "hair-crown", "hair-fringe-left", "hair-fringe-right", "hair-side-right", "hair-tips-lower", "hair-side-left"],
+    "dragged": ["source-support", "face", "eye-left", "eye-right", "hair-crown", "hair-fringe-left", "hair-fringe-right", "hair-side-right", "hair-tips-lower", "hair-side-left"],
+    "receiving": ["source-support", "face", "eye-left", "eye-right", "hair-crown", "hair-fringe-left", "hair-fringe-right", "hair-side-right", "hair-tips-lower", "hair-side-left"],
+    "success": ["source-support", "face", "eye-left", "eye-right", "hair-crown", "hair-fringe-left", "hair-fringe-right", "hair-side-right", "hair-tips-lower", "hair-side-left"]
+  },
+  "motion": {
+    "body": "The complete assembled source is animated by the existing damped spring, squash/stretch, drag inertia and edge response.",
+    "hair": "Source cutouts use low-amplitude velocity lag.",
+    "eyes": "Independent source cutouts stay on their original anchors because the image has no replacement eye poses and no pixels behind the eyes."
+  },
+  "provenance": "Every visible source-layer pixel is extracted from source-reference.png. No face, eye or accessory pixels are generated or repainted.",
+  "cropCompletion": "none"
+}

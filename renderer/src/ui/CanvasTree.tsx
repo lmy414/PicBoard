@@ -34,6 +34,7 @@ export function ContextMenu({ menu, onClose }: { menu: ContextMenuState | null; 
   if (menu) lastRef.current = menu;
   const shown = menu ?? lastRef.current;
   const menuRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [pos, setPos] = useState({ left: menu?.x ?? 0, top: menu?.y ?? 0 });
   const x = menu?.x;
   const y = menu?.y;
@@ -46,22 +47,50 @@ export function ContextMenu({ menu, onClose }: { menu: ContextMenuState | null; 
     });
   }, [x, y, presence.mounted]);
   const open = menu !== null;
+  useLayoutEffect(() => {
+    if (!open || !presence.mounted) return;
+    itemRefs.current[0]?.focus({ preventScroll: true });
+  }, [open, presence.mounted]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) onClose();
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+      if (items.length === 0) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = items.findIndex((item) => item === document.activeElement);
+        let next: number;
+        if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = items.length - 1;
+        else if (event.key === "ArrowDown") next = current < 0 ? 0 : (current + 1) % items.length;
+        else next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length;
+        items[next].focus({ preventScroll: true });
+        return;
+      }
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (event.repeat) return;
+      const active = document.activeElement;
+      const button = active instanceof HTMLElement ? active.closest<HTMLButtonElement>('[role="menuitem"]') : null;
+      if (!button || !menuRef.current?.contains(button)) return;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      button.click();
     };
     document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", escape, true);
+    document.addEventListener("keydown", keydown, true);
     return () => {
       document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("keydown", escape, true);
+      document.removeEventListener("keydown", keydown, true);
     };
   }, [onClose, open]);
   if (!presence.mounted || !shown) return null;
@@ -75,8 +104,14 @@ export function ContextMenu({ menu, onClose }: { menu: ContextMenuState | null; 
       style={pos}
       onContextMenu={(event) => event.preventDefault()}
     >
-      {shown.items.map((item) => (
-        <button key={item.label} role="menuitem" className={item.danger ? "danger-link" : undefined} onClick={() => { onClose(); item.onSelect(); }}>{item.label}</button>
+      {shown.items.map((item, index) => (
+        <button
+          key={item.label}
+          ref={(element) => { itemRefs.current[index] = element; }}
+          role="menuitem"
+          className={item.danger ? "danger-link" : undefined}
+          onClick={() => { onClose(); item.onSelect(); }}
+        >{item.label}</button>
       ))}
     </div>,
     document.body,

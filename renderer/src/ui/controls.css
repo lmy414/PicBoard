@@ -1,8 +1,8 @@
 /*!
  * Custom controls styling (controls lane). Every selector is qib- prefixed so
  * this file cannot collide with global styles.css owned by the ui lane. Design
- * tokens (--surface-*/--text/--line/--edge/--elev-*/--accent/--radius-*) are
- * read from the app-wide theme token blocks in renderer/src/styles.css.
+ * tokens (--surface-*, --text, --line, --edge, --elev-*, --accent,
+ * --radius-*) are read from the app-wide token block in renderer/src/styles.css.
  */
 
 /* ---------- Shared popover layer & panel ---------- */
@@ -578,7 +578,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--surface-panel);
-  box-shadow: 0 1px 2px rgba(15, 15, 15, .18);
+  box-shadow: 0 1px 2px rgba(20, 28, 22, .18);
   transition: transform 0.16s ease;
 }
 

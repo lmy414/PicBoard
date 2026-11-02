@@ -1,8 +1,8 @@
 /*!
  * Plugin settings section (lane P). Every selector is plg- prefixed so this
  * file cannot collide with global styles.css. Design tokens
- * (--surface-*/--text/--accent/--elev-*/--radius-*) come from the app-wide
- * theme token blocks in renderer/src/styles.css.
+ * (--surface-*, --text, --accent, --elev-*, --radius-*) come from the app-wide
+ * token block in renderer/src/styles.css.
  */
 
 .plg-section {
@@ -15,20 +15,19 @@
   flex: 0 0 auto;
   padding: 6px 12px;
   border-radius: var(--radius-s);
-  background: var(--surface-panel);
-  box-shadow: var(--elev-1);
+  background: var(--surface-sunken);
   color: var(--text);
   font-size: 12px;
   white-space: nowrap;
 }
 
 .plg-reload:hover:not(:disabled) {
-  box-shadow: var(--elev-hover);
+  background: var(--surface-hover);
   color: var(--accent-ink);
 }
 
 .plg-reload:active:not(:disabled) {
-  background: var(--surface-press-fill); box-shadow: var(--elev-inset-sm);
+  background: var(--surface-pressed);
 }
 
 .plg-directory {
@@ -193,9 +192,9 @@
 
 .plg-processor {
   padding: 8px 9px;
+  border: var(--edge);
   border-radius: var(--radius-m);
   background: transparent;
-  box-shadow: var(--elev-inset-sm);
 }
 
 .plg-processor-head {

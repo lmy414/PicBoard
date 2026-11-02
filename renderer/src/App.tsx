@@ -12,37 +12,45 @@ import type {
   HistoryRetentionDays,
   ImportViewport,
   MainNavigation,
+  NewContentInput,
 } from "../../shared/image-board";
 import { applySelection, mergeSelection } from "../../shared/canvas-selection";
-import { canvasAppearanceDefaults, readCanvasAppearance, saveCanvasAppearance, type CanvasAppearance, type CanvasPattern } from "./canvas/canvas-appearance";
+import { readCanvasAppearance, saveCanvasAppearance, type CanvasAppearance, type CanvasPattern } from "./canvas/canvas-appearance";
 import { CanvasStage, type CanvasStageHandle } from "./canvas/CanvasStage";
-import { contentTitle } from "./content/content-meta";
+import { contentTitle, isHttpUrl } from "./content/content-meta";
 import { HistoryDrawer } from "./history/HistoryDrawer";
 import { LibraryView } from "./library/LibraryView";
 import { ContentPage } from "./pages/ContentPage";
+import { IconArrowLeft } from "./ui/ContentIcons";
 import { PluginsSection } from "./plugins/PluginsSection";
-import { CanvasTree, ContextMenu, type ContextMenuItem } from "./ui/CanvasTree";
+import { CanvasTree, ContextMenu } from "./ui/CanvasTree";
 import { ColorPicker } from "./ui/ColorPicker";
 import { ContentActions, type ContentActionContext, type PanelAnchor } from "./ui/ContentActions";
 import { DirectoryField } from "./ui/DirectoryField";
 import { Select } from "./ui/Select";
 import { ShellSettings } from "./ui/ShellSettings";
+import { ImageFileSettings } from "./ui/ImageFileSettings";
 import { IconClose, IconDots, IconFolder, IconGear, IconGrid, IconMagnet, IconMinus, IconPanelLeft, IconSearch } from "./ui/Icons";
 import { ToastView, toastChannel, type ToastChannel, type ToastKind, type ToastMessage } from "./ui/Toast";
 import { usePresence } from "./ui/motion";
-import { readTheme, setTheme, THEMES, useTheme } from "./ui/theme";
 import { SIDEBAR_WIDTH, drawerLayout as drawerLayoutBucket } from "./ui/breakpoints";
 import { useWindowLayout } from "./ui/use-breakpoints";
 
 type ViewMode = "canvas" | "library" | "settings";
-type DialogState = ({ kind: "prompt"; title: string; value: string; resolve: (value: string | null) => void } | { kind: "confirm"; title: string; message: string; resolve: (value: boolean) => void }) & { anchor?: PanelAnchor | null };
+type DialogState = (
+  | { kind: "prompt"; title: string; value: string; validate?: (value: string) => string | null; resolve: (value: string | null) => void }
+  | { kind: "confirm"; title: string; message: string; resolve: (value: boolean) => void }
+) & { anchor?: PanelAnchor | null };
 type PathSettings = { filePath: string };
 type PageOrigin = { kind: "canvas"; canvasId: string } | { kind: "library" };
 type PageState = { contentId: string; origin: PageOrigin };
 type ActionsState = { context: ContentActionContext; contentIds: string[]; nodeIds: string[]; anchor: PanelAnchor; key: number };
+type CreateMenuState = { canvasId: string; x: number; y: number; point: CanvasPoint };
 
 const PATH_SETTINGS_KEY = "quick-image-board.path-settings";
 const SIDEBAR_COLLAPSED_KEY = "quick-image-board.sidebar-collapsed";
+/** Time the pointer may cross the gap between the toggle and its peek panel. */
+const SIDEBAR_PEEK_GRACE_MS = 170;
 const HISTORY_OPEN_KEY = "quick-image-board.history-open";
 const DEFAULT_PATH_SETTINGS: PathSettings = { filePath: "quick-image-board" };
 const FALLBACK_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 };
@@ -80,6 +88,13 @@ function readPathSettings(): PathSettings {
   } catch { return { ...DEFAULT_PATH_SETTINGS }; }
 }
 
+function readSidebarPinned(): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    return raw === null ? null : raw !== "1";
+  } catch { return null; }
+}
+
 function isEditableTarget(target: EventTarget | null) {
   const element = target instanceof HTMLElement ? target : null;
   return Boolean(element?.isContentEditable || element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .ProseMirror'));
@@ -105,13 +120,13 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("canvas");
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
+  const [sidebarPinnedChoice, setSidebarPinnedChoice] = useState<boolean | null>(readSidebarPinned);
+  const [sidebarPeek, setSidebarPeek] = useState(false);
   const [treeQuery, setTreeQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showControls, setShowControls] = useState(false);
   const [pathSettings, setPathSettings] = useState<PathSettings>(() => readPathSettings());
-  const { theme } = useTheme();
-  const [canvasAppearance, setCanvasAppearance] = useState<CanvasAppearance>(() => readCanvasAppearance(window.localStorage, readTheme()));
+  const [canvasAppearance, setCanvasAppearance] = useState<CanvasAppearance>(() => readCanvasAppearance(window.localStorage));
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   selectedNodeIdsRef.current = selectedNodeIds;
@@ -125,6 +140,8 @@ function App() {
   const selectedEdgeIdsRef = useRef(selectedEdgeIds);
   selectedEdgeIdsRef.current = selectedEdgeIds;
   const [page, setPage] = useState<PageState | null>(null);
+  const pageNavigationGuardRef = useRef<(() => boolean | Promise<boolean>) | null>(null);
+  const [workspaceToolbarHost, setWorkspaceToolbarHost] = useState<HTMLDivElement | null>(null);
   const pageRef = useRef<PageState | null>(page);
   pageRef.current = page;
   const [pageOpen, setPageOpen] = useState(false);
@@ -141,6 +158,11 @@ function App() {
   const actionsKeyRef = useRef(0);
   const [cardMenu, setCardMenu] = useState<{ canvasId: string; x: number; y: number } | null>(null);
   const [edgeMenu, setEdgeMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null);
+  const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
+  const createMenuRef = useRef<CreateMenuState | null>(createMenu);
+  createMenuRef.current = createMenu;
+  /** Last pointer position, tracked passively so Shift+A never re-renders on move. */
+  const pointerClientRef = useRef<{ x: number; y: number } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(() => window.localStorage.getItem(HISTORY_OPEN_KEY) !== "0");
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings | null>(null);
   const [captureEnabled, setCaptureEnabled] = useState(true);
@@ -153,16 +175,25 @@ function App() {
   const [zoomDisplay, setZoomDisplay] = useState(FALLBACK_VIEWPORT.zoom);
   const viewportCacheRef = useRef(new Map<string, CanvasViewport>());
   const windowLayout = useWindowLayout();
-  const sidebarDocked = windowLayout.sidebar === "docked";
-  const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
-  const sidebarSheetPresence = usePresence(sidebarOverlayOpen && !sidebarDocked, 200);
-  const sidebarOpen = sidebarDocked ? !sidebarCollapsed : sidebarOverlayOpen;
+  // A saved pin choice wins at every width; only an unsaved preference falls
+  // back to the wide-window default (pinned at >=1100, collapsed below).
+  const sidebarPinned = sidebarPinnedChoice ?? windowLayout.sidebar === "docked";
+  const sidebarVisible = sidebarPinned || sidebarPeek;
+  const sidebarVisibleRef = useRef(sidebarVisible);
+  sidebarVisibleRef.current = sidebarVisible;
+  const sidebarPinnedRef = useRef(sidebarPinned);
+  sidebarPinnedRef.current = sidebarPinned;
+  const sidebarPeekRef = useRef(sidebarPeek);
+  sidebarPeekRef.current = sidebarPeek;
+  const sidebarPointerInsideRef = useRef(false);
+  const peekTimerRef = useRef<number | null>(null);
   const toggleSidebarRef = useRef<() => void>(() => {});
   const workspaceMainRef = useRef<HTMLDivElement>(null);
-  // Derived from the window width minus the docked sidebar, never from the
+  // Derived from the window width minus the pinned sidebar, never from the
   // observed element: the drawer's own slot width feeds back into
-  // workspace-main, which oscillated docked<->overlay on every frame.
-  const drawerLayout = drawerLayoutBucket(window.innerWidth - (sidebarDocked ? SIDEBAR_WIDTH : 0));
+  // workspace-main, which oscillated docked<->overlay on every frame. A hover
+  // peek floats over the workspace and therefore claims no width.
+  const drawerLayout = drawerLayoutBucket(window.innerWidth - (sidebarPinned ? SIDEBAR_WIDTH : 0));
   const [topbarMenu, setTopbarMenu] = useState<{ x: number; y: number } | null>(null);
   const viewportTimersRef = useRef(new Map<string, number>());
   const gestureBusyRef = useRef(false);
@@ -191,6 +222,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(busy);
   busyRef.current = busy;
+  /** Synchronous guard: the async create flow may await a URL prompt before `busy` renders. */
+  const createNodeBusyRef = useRef(false);
   const copyBusyRef = useRef(false);
   /** Prevents a second delete/remove from racing the 140 ms exit animation. */
   const structureBusyRef = useRef(false);
@@ -207,15 +240,17 @@ function App() {
   const shownDialog = dialog ?? lastDialogRef.current;
   const dialogPresence = usePresence(dialog !== null, 140);
   const appShellRef = useRef<HTMLElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement | null>(null);
+  const sidebarKeyboardInputRef = useRef(false);
+  const trailCurrentRef = useRef<HTMLButtonElement>(null);
   const historySlotRef = useRef<HTMLDivElement>(null);
   const workspaceViewRef = useRef<HTMLDivElement>(null);
   const changeCanvasRef = useRef<(canvasId: string) => void>(() => {});
-  const switchViewRef = useRef<(view: ViewMode) => void>(() => {});
+  const switchViewRef = useRef<(view: ViewMode) => boolean | Promise<boolean>>(() => true);
   const openPageRef = useRef<(contentId: string, origin: PageOrigin, originElement?: HTMLElement | null) => void>(() => {});
 
   const activeCanvas = state?.canvases.find((canvas) => canvas.id === state.activeCanvasId) ?? null;
   const activeParentId = activeCanvas?.parentId ?? null;
-  const nodeCount = activeCanvas?.nodes.length ?? 0;
   const contentCount = state ? Object.keys(state.contents).length : 0;
   const dialogOpen = dialog !== null;
   const breadcrumb = useMemo(() => {
@@ -261,8 +296,8 @@ function App() {
   canvasContentIdsRef.current = canvasContentIds;
   const selectableContentIds = viewMode === "canvas" ? canvasContentIds : selectedContentIds;
 
-  // Selection toolbar / canvas toolbar / breadcrumb keep their last content
-  // mounted through the exit; pointer input is disabled by the motion preset.
+  // Selection toolbar / canvas toolbar keep their last content mounted through
+  // the exit; pointer input is disabled by the motion preset.
   const selectionOpen = !actions && !page
     && (selectedNodeIds.length > 0
       || selectedEdgeIds.length > 0
@@ -280,10 +315,6 @@ function App() {
   }
   const selectionPresence = usePresence(selectionOpen, 140);
   const canvasToolbarPresence = usePresence(showControls && viewMode === "canvas" && !page, 140);
-  const breadcrumbPresence = usePresence(Boolean(activeParentId && breadcrumb.length > 1), 140);
-  const lastBreadcrumbRef = useRef<CanvasRecord[]>([]);
-  if (breadcrumb.length > 1) lastBreadcrumbRef.current = breadcrumb;
-  const shownBreadcrumb = breadcrumb.length > 1 ? breadcrumb : lastBreadcrumbRef.current;
 
   // ---- single feedback outlet -------------------------------------------------
   const showToast = useCallback((kind: ToastKind, message: string) => {
@@ -390,8 +421,9 @@ function App() {
   }, []);
 
   useEffect(() => {
-    try { window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0"); } catch { /* local preference storage is optional */ }
-  }, [sidebarCollapsed]);
+    if (sidebarPinnedChoice === null) return;
+    try { window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarPinnedChoice ? "0" : "1"); } catch { /* local preference storage is optional */ }
+  }, [sidebarPinnedChoice]);
   useEffect(() => {
     try { window.localStorage.setItem(HISTORY_OPEN_KEY, historyOpen ? "1" : "0"); } catch { /* local preference storage is optional */ }
   }, [historyOpen]);
@@ -408,77 +440,151 @@ function App() {
     if (page) view.setAttribute("inert", "");
     else view.removeAttribute("inert");
   }, [page]);
+  const cancelPeekClose = useCallback(() => {
+    if (peekTimerRef.current === null) return;
+    window.clearTimeout(peekTimerRef.current);
+    peekTimerRef.current = null;
+  }, []);
+  const closePeek = useCallback(() => {
+    cancelPeekClose();
+    setSidebarPeek(false);
+  }, [cancelPeekClose]);
+  const openPeek = useCallback(() => {
+    if (sidebarPinnedRef.current) return;
+    cancelPeekClose();
+    setSidebarPeek(true);
+  }, [cancelPeekClose]);
+  /** Keyboard focus — or a focused search field — holds the peek open. */
+  const peekHeldByKeyboard = useCallback(() => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !active.closest(".sidebar")) return false;
+    return sidebarKeyboardInputRef.current || active === searchInputRef.current;
+  }, []);
+  /** Close intent: wait out the trigger/panel gap, and never while hovering. */
+  const schedulePeekClose = useCallback(() => {
+    if (sidebarPinnedRef.current || sidebarPointerInsideRef.current) return;
+    cancelPeekClose();
+    peekTimerRef.current = window.setTimeout(() => {
+      peekTimerRef.current = null;
+      if (!sidebarPinnedRef.current && !sidebarPointerInsideRef.current && !peekHeldByKeyboard()) setSidebarPeek(false);
+    }, SIDEBAR_PEEK_GRACE_MS);
+  }, [cancelPeekClose, peekHeldByKeyboard]);
+  useEffect(() => {
+    const trackPointer = (event: PointerEvent) => {
+      pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    };
+    window.addEventListener("pointermove", trackPointer, { passive: true });
+    return () => window.removeEventListener("pointermove", trackPointer);
+  }, []);
+  useEffect(() => {
+    const markKeyboard = () => { sidebarKeyboardInputRef.current = true; };
+    const markPointer = () => { sidebarKeyboardInputRef.current = false; };
+    document.addEventListener("keydown", markKeyboard, true);
+    document.addEventListener("pointerdown", markPointer, true);
+    return () => {
+      document.removeEventListener("keydown", markKeyboard, true);
+      document.removeEventListener("pointerdown", markPointer, true);
+    };
+  }, []);
+  // A closed sidebar is out of the tab order even before its fade finishes,
+  // including on the first mount while the data snapshot is still loading.
+  const attachSidebarContent = useCallback((node: HTMLDivElement | null) => {
+    sidebarContentRef.current = node;
+    if (!node) return;
+    if (sidebarVisibleRef.current) node.removeAttribute("inert");
+    else node.setAttribute("inert", "");
+  }, []);
+  useLayoutEffect(() => {
+    const content = sidebarContentRef.current;
+    if (!content) return;
+    if (sidebarVisible) content.removeAttribute("inert");
+    else content.setAttribute("inert", "");
+  }, [sidebarVisible]);
+  useEffect(() => {
+    const onWindowBlur = () => {
+      if (!sidebarPinnedRef.current) closePeek();
+    };
+    window.addEventListener("blur", onWindowBlur);
+    return () => window.removeEventListener("blur", onWindowBlur);
+  }, [closePeek]);
+  // The peek floats above a mounted full page. Capture Escape at the window
+  // (before any page mounts its own listener) so only the peek dismisses;
+  // dialogs, actions and portalled menus keep Escape first.
+  useEffect(() => {
+    const onPeekEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      if (!sidebarPeekRef.current || sidebarPinnedRef.current) return;
+      if (dialogRef.current || actionsRef.current || gestureBusyRef.current) return;
+      if (isEditableTarget(event.target)) return;
+      if (document.querySelector('[data-esc-layer], .dialog-card, .content-actions, .canvas-context-menu')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closePeek();
+    };
+    window.addEventListener("keydown", onPeekEscape, true);
+    return () => window.removeEventListener("keydown", onPeekEscape, true);
+  }, [closePeek]);
+  useEffect(() => () => {
+    if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
+  }, []);
+  // Deep chains scroll horizontally; keep the active tab reachable.
+  useLayoutEffect(() => {
+    const trail = trailCurrentRef.current?.closest(".canvas-trail");
+    if (!trail) return;
+    const revealCurrent = () => trailCurrentRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    revealCurrent();
+    const resizeObserver = new ResizeObserver(revealCurrent);
+    resizeObserver.observe(trail);
+    const contentObserver = new MutationObserver(revealCurrent);
+    contentObserver.observe(trail, { childList: true, subtree: true, characterData: true });
+    return () => {
+      resizeObserver.disconnect();
+      contentObserver.disconnect();
+    };
+  }, [state?.activeCanvasId, viewMode, page]);
   const toggleSidebar = useCallback(() => {
-    if (sidebarDocked) {
+    cancelPeekClose();
+    if (sidebarPinnedRef.current) {
       const active = document.activeElement;
-      if (!sidebarCollapsed && active instanceof HTMLElement && active.closest(".sidebar")) active.blur();
-      setSidebarCollapsed(!sidebarCollapsed);
-      // The width animation resizes the canvas viewport from the left; keep the
-      // world fixed to the window instead of the moving viewport center.
+      if (active instanceof HTMLElement && active.closest(".sidebar")) active.blur();
+      setSidebarPinnedChoice(false);
+      // An explicit close dismisses the hover peek as well, even while the
+      // pointer stays on the toggle. A later pointer entry can preview again.
+      setSidebarPeek(false);
       stageRef.current?.beginWindowAnchoredResize();
     } else {
-      setSidebarOverlayOpen((open) => !open);
+      setSidebarPinnedChoice(true);
+      setSidebarPeek(false);
+      stageRef.current?.beginWindowAnchoredResize();
     }
-  }, [sidebarCollapsed, sidebarDocked]);
+  }, [cancelPeekClose]);
   toggleSidebarRef.current = toggleSidebar;
-
-  // Wide windows dock the sidebar; the overlay sheet only exists below 1100 px.
+  // The floating peek has no scrim: any press outside the panel, its toggle or
+  // a portalled tree menu dismisses it. A pinned sidebar never closes this way.
   useEffect(() => {
-    if (sidebarDocked) setSidebarOverlayOpen(false);
-  }, [sidebarDocked]);
-  useEffect(() => {
-    if (sidebarDocked || !sidebarOverlayOpen) return;
+    if (sidebarPinned || !sidebarPeek) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
-      // Tree context menus are portaled to the body but still belong to the sheet.
-      // The topbar toggle is excluded so its click performs the single toggle.
-      if (!target?.closest(".sidebar, .sidebar-toggle, .canvas-context-menu")) setSidebarOverlayOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSidebarOverlayOpen(false);
+      if (!target?.closest(".sidebar, .sidebar-toggle, .canvas-context-menu")) closePeek();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKey, true);
-    };
-  }, [sidebarDocked, sidebarOverlayOpen]);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [closePeek, sidebarPeek, sidebarPinned]);
   useEffect(() => {
     try { window.localStorage.setItem(PATH_SETTINGS_KEY, JSON.stringify(pathSettings)); } catch { /* local preference storage is optional */ }
   }, [pathSettings]);
   useEffect(() => saveCanvasAppearance(window.localStorage, canvasAppearance), [canvasAppearance]);
-  // Until the user picks a canvas colour the defaults follow the active theme.
-  useEffect(() => {
-    const defaults = canvasAppearanceDefaults(theme);
-    setCanvasAppearance((current) => ({
-      ...current,
-      background: current.backgroundCustomized ? current.background : defaults.background,
-      patternColor: current.inkCustomized ? current.patternColor : defaults.patternColor,
-      patternOpacity: current.inkCustomized ? current.patternOpacity : defaults.patternOpacity,
-    }));
-  }, [theme]);
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
       if (isEditableTarget(event.target)) return;
       event.preventDefault();
-      if (sidebarDocked) {
-        if (sidebarCollapsed) {
-          setSidebarCollapsed(false);
-          requestAnimationFrame(() => searchInputRef.current?.focus());
-        } else {
-          searchInputRef.current?.focus();
-        }
-        return;
-      }
-      // Narrow windows: open the overlay sheet, then focus its search field.
-      setSidebarOverlayOpen(true);
+      openPeek();
       requestAnimationFrame(() => searchInputRef.current?.focus());
     };
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
-  }, [sidebarCollapsed, sidebarDocked]);
+  }, [openPeek]);
 
   // Keep the zoom readout in sync with the live canvas viewport cache.
   useEffect(() => {
@@ -570,6 +676,10 @@ function App() {
     setPageOpen(false);
   }, []);
 
+  const requestPageClose = useCallback(async () => {
+    if (await pageNavigationGuardRef.current?.() !== false) closePage();
+  }, [closePage]);
+
   const openPage = useCallback((contentId: string, origin: PageOrigin, originElement?: HTMLElement | null) => {
     const current = stateRef.current;
     if (!current?.contents[contentId]) return;
@@ -577,6 +687,7 @@ function App() {
     setActions(null);
     setCardMenu(null);
     setEdgeMenu(null);
+    setCreateMenu(null);
     setPage({ contentId, origin });
     setPageOpen(true);
   }, []);
@@ -659,6 +770,7 @@ function App() {
     setActions({ context, contentIds: ids, nodeIds, anchor, key: ++actionsKeyRef.current });
     setCardMenu(null);
     setEdgeMenu(null);
+    setCreateMenu(null);
   }, []);
 
   const openNodeActions = useCallback((event: React.MouseEvent<HTMLElement> | null, nodeId: string) => {
@@ -700,7 +812,7 @@ function App() {
   }, [openContentActions]);
 
   // ---- dialogs ---------------------------------------------------------------
-  const openPrompt = (title: string, value = "") => new Promise<string | null>((resolve) => setDialog({ kind: "prompt", title, value, resolve, anchor: null }));
+  const openPrompt = (title: string, value = "", validate?: (value: string) => string | null) => new Promise<string | null>((resolve) => setDialog({ kind: "prompt", title, value, validate, resolve, anchor: null }));
   const openConfirm = (title: string, message: string) => new Promise<boolean>((resolve) => setDialog({ kind: "confirm", title, message, resolve }));
   const clearDialog = useCallback(() => setDialog(null), []);
 
@@ -945,6 +1057,7 @@ function App() {
   const changeCanvas = useCallback(async (canvasId: string) => {
     const current = stateRef.current;
     if (!current || busyRef.current) return;
+    if (pageRef.current && await pageNavigationGuardRef.current?.() === false) return;
     if (pageRef.current) dismissPage();
     if (canvasId === current.activeCanvasId) return;
     const isAncestor = (ancestorId: string, descendantId: string) => {
@@ -963,6 +1076,7 @@ function App() {
     // overwrite the switch result.
     gestureBusyRef.current = false;
     pendingPushRef.current = null;
+    setCreateMenu(null);
     clearSelection();
     markBusy();
     try {
@@ -993,7 +1107,8 @@ function App() {
     void update(() => window.imageBoard.ungroupCanvas(canvasId));
   }, [clearSelection, update]);
 
-  const switchView = useCallback((next: ViewMode) => {
+  const switchView = useCallback(async (next: ViewMode) => {
+    if (pageRef.current && await pageNavigationGuardRef.current?.() === false) return false;
     gestureBusyRef.current = false;
     pendingPushRef.current = null;
     dismissPage();
@@ -1003,6 +1118,8 @@ function App() {
     setActions(null);
     setCardMenu(null);
     setEdgeMenu(null);
+    setCreateMenu(null);
+    return true;
   }, [clearSelection, dismissPage]);
   switchViewRef.current = switchView;
   openPageRef.current = openPage;
@@ -1030,6 +1147,96 @@ function App() {
     }).catch((caught) => showError(caught instanceof Error ? caught.message : "放到画布失败"));
     return true;
   }, [applyState, showError, showNotice]);
+
+  // ---- new nodes from blank canvas ------------------------------------------
+  const openCreateMenu = useCallback((clientX: number, clientY: number) => {
+    const stage = stageRef.current;
+    const current = stateRef.current;
+    if (!stage || !current?.activeCanvasId) return;
+    if (busyRef.current || createNodeBusyRef.current || pageRef.current || dialogRef.current) return;
+    // A fading dialog/page drops pointer events; never create through its exit.
+    if (document.querySelector(".dialog-card, .page-layer")) return;
+    if (!stage.containsClient(clientX, clientY)) return;
+    const point = stage.worldPoint(clientX, clientY);
+    if (!point) return;
+    setCardMenu(null);
+    setEdgeMenu(null);
+    setTopbarMenu(null);
+    setActions(null);
+    setCreateMenu({ canvasId: current.activeCanvasId, x: clientX, y: clientY, point });
+  }, []);
+
+  /** Shift+A: use the live pointer only while it is over the canvas, else the viewport center. */
+  const openCreateMenuFromKeyboard = useCallback(() => {
+    const stage = stageRef.current;
+    const current = stateRef.current;
+    if (!stage || !current?.activeCanvasId) return;
+    const viewport = document.querySelector<HTMLElement>(".canvas-viewport");
+    const rect = viewport?.getBoundingClientRect();
+    if (!rect) return;
+    const pointer = pointerClientRef.current;
+    const pointClient = pointer && stage.containsClient(pointer.x, pointer.y) ? pointer : null;
+    openCreateMenu(
+      pointClient ? pointClient.x : rect.left + rect.width / 2,
+      pointClient ? pointClient.y : rect.top + rect.height / 2,
+    );
+  }, [openCreateMenu]);
+
+  const createNodeFromMenu = useCallback(async (kind: NewContentInput["kind"], target: CreateMenuState) => {
+    if (busyRef.current || createNodeBusyRef.current) return;
+    createNodeBusyRef.current = true;
+    try {
+      let input: NewContentInput;
+      if (kind === "link") {
+        const value = await openPrompt("新建链接节点", "https://", (candidate) => isHttpUrl(candidate) ? null : "请输入完整的 http(s) 链接");
+        if (value === null) return;
+        const url = value.trim();
+        if (!isHttpUrl(url)) return;
+        input = { kind: "link", url };
+      } else {
+        input = { kind };
+      }
+      markBusy("正在新建节点…");
+      try {
+        const result = await window.imageBoard.createContentNode(target.canvasId, target.point, input);
+        spawnNonceRef.current += 1;
+        setSpawnFrom({ point: target.point, nonce: spawnNonceRef.current });
+        applyState(result.state);
+        selectedNodeIdsRef.current = [result.nodeId];
+        setSelectedNodeIds([result.nodeId]);
+        selectedCardIdRef.current = null;
+        setSelectedCardId(null);
+        selectedEdgeIdsRef.current = [];
+        setSelectedEdgeIds([]);
+        openPage(result.contentId, { kind: "canvas", canvasId: target.canvasId }, null);
+        showNotice("已新建节点");
+      } catch (caught) {
+        showError(caught instanceof Error ? caught.message : "新建节点失败");
+      } finally {
+        markIdle();
+      }
+    } finally {
+      createNodeBusyRef.current = false;
+    }
+    // openPrompt is intentionally not a dependency: it only opens the modal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyState, markBusy, markIdle, openPage, showError, showNotice]);
+
+  const buildCreateMenu = (target: CreateMenuState) => ({
+    x: target.x,
+    y: target.y,
+    items: [
+      { label: "新建文本节点", onSelect: () => void createNodeFromMenu("text", target) },
+      { label: "新建链接节点", onSelect: () => void createNodeFromMenu("link", target) },
+      { label: "新建富文本节点", onSelect: () => void createNodeFromMenu("richText", target) },
+    ],
+  });
+
+  // A menu anchored to a canvas that is no longer showing must not linger.
+  useEffect(() => {
+    if (!createMenu) return;
+    if (viewMode !== "canvas" || state?.activeCanvasId !== createMenu.canvasId) setCreateMenu(null);
+  }, [createMenu, state?.activeCanvasId, viewMode]);
 
   // ---- clipboard paste -------------------------------------------------------
   useEffect(() => {
@@ -1061,9 +1268,9 @@ function App() {
   useEffect(() => {
     const api = window.imageBoard;
     if (typeof api.onNavigate !== "function") return;
-    return api.onNavigate((navigate) => {
+    return api.onNavigate(async (navigate) => {
       const view = navigate.view ?? viewModeRef.current;
-      if (view !== viewModeRef.current) switchViewRef.current(view);
+      if (view !== viewModeRef.current && await switchViewRef.current(view) === false) return;
       if (navigate.contentId) {
         const current = stateRef.current;
         const origin: PageOrigin = view === "library"
@@ -1073,6 +1280,19 @@ function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!state || typeof window.imageBoard.takePendingImage !== "function") return;
+    let alive = true;
+    const open = async (result: { state: AppState; contentId: string } | null) => {
+      if (!alive || !result || await pageNavigationGuardRef.current?.() === false) return;
+      applyState(result.state);
+      openPageRef.current(result.contentId, { kind: "canvas", canvasId: result.state.activeCanvasId });
+    };
+    const unsubscribe = window.imageBoard.onImageOpened((result) => { void open(result); });
+    void window.imageBoard.takePendingImage().then(open).catch((error) => showError(String(error)));
+    return () => { alive = false; unsubscribe(); };
+  }, [Boolean(state), applyState, showError]);
 
   // External drops do nothing: collecting goes through the clipboard only.
   useEffect(() => {
@@ -1096,6 +1316,14 @@ function App() {
       // A live canvas gesture owns the keyboard (Esc also cancels relations).
       if (gestureBusyRef.current) return;
       const modifier = event.ctrlKey || event.metaKey;
+      if (event.shiftKey && !modifier && !event.altKey && !event.repeat && !event.isComposing && event.key.toLowerCase() === "a") {
+        const blocked = document.querySelector(".canvas-context-menu, .dialog-card, .content-actions, .page-layer");
+        if (viewModeRef.current === "canvas" && !busyRef.current && !createNodeBusyRef.current && stageRef.current && stateRef.current?.activeCanvasId && !blocked) {
+          event.preventDefault();
+          openCreateMenuFromKeyboard();
+        }
+        return;
+      }
       if (modifier && event.shiftKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
         toggleSidebarRef.current();
@@ -1117,6 +1345,9 @@ function App() {
         return;
       }
       if (event.key === "Escape") {
+        // The create menu owns this Escape: its own listener closes it without
+        // also clearing the selection or stepping out of a sub-canvas.
+        if (createMenuRef.current) return;
         if (selectedNodeIdsRef.current.length > 0 || selectedContentIdsRef.current.length > 0 || selectedEdgeIdsRef.current.length > 0 || selectedCardIdRef.current) {
           event.preventDefault();
           clearSelection();
@@ -1130,7 +1361,7 @@ function App() {
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [activeParentId, changeCanvas, clearSelection, copyContents, deleteCanvasSelection]);
+  }, [activeParentId, changeCanvas, clearSelection, copyContents, deleteCanvasSelection, openCreateMenuFromKeyboard]);
 
   // ---- actions from the canvas surface ---------------------------------------
   const openContentFromNode = useCallback((contentId: string, origin: HTMLElement | null) => {
@@ -1148,50 +1379,41 @@ function App() {
       y: event ? event.clientY : rect ? rect.top + 16 : 0,
     });
     setEdgeMenu(null);
+    setCreateMenu(null);
   }, []);
 
   const openEdgeMenu = useCallback((edgeId: string, clientX: number, clientY: number) => {
     setEdgeMenu({ edgeId, x: clientX, y: clientY });
     setCardMenu(null);
+    setCreateMenu(null);
   }, []);
 
   const cardMenuTarget = cardMenu ? state?.canvases.find((canvas) => canvas.id === cardMenu.canvasId) ?? null : null;
 
   if (!state) return <div className="loading-card">{loadError ? <><strong>本地内容画布打开失败</strong><span>{loadError}</span><div className="loading-actions"><button className="primary-button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>重试</button><button onClick={() => void window.imageBoard.closeWindow()}>退出</button></div></> : "正在打开本地内容画布…"}</div>;
 
-  const sidebarSheetOpen = !sidebarDocked && sidebarOverlayOpen;
   const sidebarInner = (
     <>
       <div className="sidebar-search">
         <IconSearch size={14} />
-        <input ref={searchInputRef} value={treeQuery} placeholder="搜索画布…" aria-label="搜索画布" onChange={(event) => setTreeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setTreeQuery(""); event.currentTarget.blur(); } }} />
+        <input ref={searchInputRef} value={treeQuery} placeholder="搜索画布…" aria-label="搜索画布" onChange={(event) => setTreeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setTreeQuery(""); event.currentTarget.blur(); if (!sidebarPinnedRef.current) closePeek(); } }} />
         {treeQuery === "" && <kbd>Ctrl K</kbd>}
       </div>
       <nav className="sidebar-nav">
         <button className={viewMode === "canvas" ? "active" : undefined} onClick={() => switchView("canvas")}><IconGrid size={15} />画布</button>
         <button className={viewMode === "library" ? "active" : undefined} onClick={() => switchView("library")}><IconFolder size={15} />分类库</button>
-        <button className={viewMode === "settings" ? "active" : undefined} onClick={() => switchView("settings")}><IconGear size={15} />设置</button>
       </nav>
       {viewMode === "canvas" && <CanvasTree canvases={state.canvases} activeCanvasId={state.activeCanvasId} query={treeQuery} onEnter={(canvasId) => void changeCanvas(canvasId)} onCreateRoot={() => { clearSelection(); void update(() => window.imageBoard.createCanvas()); }} onCreateChild={(parentId) => { clearSelection(); void update(() => window.imageBoard.createCanvas(parentId)); }} onRename={(canvasId) => void renameCanvasById(canvasId)} onDelete={(canvasId) => void deleteCanvas(canvasId)} onUngroup={ungroupCanvasById} onMove={moveCanvasNode} />}
       <footer className="sidebar-footer">
         <div className="footer-avatar"><AppLogo size={20} /></div>
         <div className="footer-copy"><strong>PicBoard 本地工作区</strong><span>{state.canvases.length} 个画布 · {contentCount} 项内容</span></div>
+        <button type="button" className={`icon-button sidebar-settings${viewMode === "settings" ? " active" : ""}`} aria-label="打开设置" title="设置" aria-pressed={viewMode === "settings"} onClick={() => switchView("settings")}><IconGear size={16} /></button>
       </footer>
     </>
   );
 
   const canvasView = activeCanvas ? (
     <>
-      {breadcrumbPresence.mounted && shownBreadcrumb.length > 1 && (
-        <div className="canvas-breadcrumb motion-slide-down" data-motion={breadcrumbPresence.phase}>
-          {shownBreadcrumb.map((canvas, index) => (
-            <Fragment key={canvas.id}>
-              {index > 0 && <span aria-hidden="true">›</span>}
-              <button className={canvas.id === activeCanvas.id ? "crumb-current" : undefined} disabled={canvas.id === activeCanvas.id} onClick={() => void changeCanvas(canvas.id)}>{canvas.name}</button>
-            </Fragment>
-          ))}
-        </div>
-      )}
       {canvasToolbarPresence.mounted && (
         <div className="canvas-controls motion-slide-down" data-motion={canvasToolbarPresence.phase}>
           <div className="canvas-toolbar">
@@ -1242,6 +1464,7 @@ function App() {
         onNodeActions={openNodeActions}
         onCardMenu={openCardMenu}
         onEdgeMenu={openEdgeMenu}
+        onCanvasContextMenu={openCreateMenu}
         onNodesMove={(positions) => void moveNodes(positions)}
         onNodesDrop={(nodeIds, cardId) => void moveNodesIntoCard(nodeIds, cardId)}
         onCardMove={moveCard}
@@ -1255,15 +1478,19 @@ function App() {
     <div className="empty-canvas"><strong>画布不存在</strong><span>请在左侧选择或新建画布</span></div>
   );
 
-  return <main ref={appShellRef} className="app-shell">
+  return <main ref={appShellRef} className={`app-shell${maximized ? " is-maximized" : ""}`}>
     <header className="topbar">
       <button
         type="button"
-        className={`icon-button no-drag sidebar-toggle${sidebarOpen ? " active" : ""}`}
-        title={sidebarOpen ? "隐藏侧边栏 (Ctrl+Shift+S)" : "显示侧边栏 (Ctrl+Shift+S)"}
-        aria-label={sidebarOpen ? "隐藏侧边栏 (Ctrl+Shift+S)" : "显示侧边栏 (Ctrl+Shift+S)"}
-        aria-pressed={sidebarOpen}
+        className={`icon-button no-drag sidebar-toggle${sidebarPinned ? " active" : ""}`}
+        title={sidebarPinned ? "收起侧边栏 (Ctrl+Shift+S)" : "固定侧边栏 (Ctrl+Shift+S)"}
+        aria-label={sidebarPinned ? "收起侧边栏 (Ctrl+Shift+S)" : "固定侧边栏 (Ctrl+Shift+S)"}
+        aria-pressed={sidebarPinned}
+        aria-expanded={sidebarVisible}
         onClick={toggleSidebar}
+        onPointerEnter={() => { sidebarPointerInsideRef.current = true; openPeek(); }}
+        onPointerLeave={() => { sidebarPointerInsideRef.current = false; schedulePeekClose(); }}
+        onBlur={() => schedulePeekClose()}
       >
         <IconPanelLeft size={16} />
       </button>
@@ -1275,27 +1502,58 @@ function App() {
               <button
                 type="button"
                 className="crumb-origin"
-                onClick={closePage}
+                onClick={() => void requestPageClose()}
                 title="返回（Esc）"
                 aria-label={`返回到${pageOriginLabel}`}
               >
-                {pageOriginLabel}
+                <IconArrowLeft size={14} /><span>{pageOriginLabel}</span>
               </button>
               <span aria-hidden="true"> › </span>
               <strong>{pageContent ? contentTitle(pageContent) : "内容"}</strong>
             </span>
           </div>
+        ) : viewMode === "canvas" ? (
+          <nav className="canvas-trail no-drag" aria-label="画布层级">
+            {breadcrumb.map((canvas, index) => (
+              <Fragment key={canvas.id}>
+                {index > 0 && <span className="canvas-trail-sep" aria-hidden="true">›</span>}
+                <button
+                  type="button"
+                  ref={canvas.id === activeCanvas?.id ? trailCurrentRef : undefined}
+                  className={`no-drag canvas-trail-item${canvas.id === activeCanvas?.id ? " is-current" : ""}`}
+                  title={canvas.name}
+                  aria-current={canvas.id === activeCanvas?.id ? "page" : undefined}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onClick={() => void changeCanvas(canvas.id)}
+                >{canvas.name}</button>
+              </Fragment>
+            ))}
+            <button
+              type="button"
+              className="canvas-trail-add no-drag"
+              title={activeCanvas ? "新建子画布" : "新建画布"}
+              aria-label={activeCanvas ? "新建子画布" : "新建画布"}
+              onPointerDown={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onClick={() => {
+                clearSelection();
+                void update(() => activeCanvas ? window.imageBoard.createCanvas(activeCanvas.id) : window.imageBoard.createCanvas());
+              }}
+            >＋</button>
+          </nav>
         ) : (
           <div className="brand-copy">
-            <strong>{viewMode === "canvas" ? (activeCanvas?.name ?? "画布") : viewMode === "library" ? "分类库" : "设置"}</strong>
-            <span>{viewMode === "canvas" ? `${nodeCount} 个节点` : viewMode === "library" ? `${contentCount} 项内容` : "外观、剪贴板与窗口行为"}</span>
+            <strong>{viewMode === "library" ? "分类库" : "设置"}</strong>
+            <span>{viewMode === "library" ? `${contentCount} 项内容` : "画布、剪贴板与窗口行为"}</span>
           </div>
         )}
       </div>
       <div className="topbar-actions">
+        <button type="button" className="icon-button no-drag" aria-label="打开图片" title="打开图片" onClick={() => void window.imageBoard.openImageFile().then(async (result) => { if (!result || await pageNavigationGuardRef.current?.() === false) return; applyState(result.state); openPage(result.contentId, { kind: "canvas", canvasId: result.state.activeCanvasId }); }).catch((error) => showError(error instanceof Error ? error.message : "图片打开失败"))}><IconFolder size={15} /></button>
         <button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button>
         <button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button>
-        {windowLayout.topbar === "compact" ? (
+        {windowLayout.topbar === "compact" ? (viewMode === "canvas" && !page && (
           <button
             className="icon-button no-drag topbar-more"
             aria-label="更多操作"
@@ -1304,12 +1562,12 @@ function App() {
             title="更多操作"
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
+              setCreateMenu(null);
               setTopbarMenu({ x: rect.left, y: rect.bottom + 6 });
             }}
           ><IconDots size={16} /></button>
-        ) : (
+        )) : (
           <>
-            <button className={`icon-button no-drag settings-button ${viewMode === "settings" ? "active" : ""}`} aria-label="打开设置" title="打开设置" onClick={() => switchView("settings")}><IconGear size={15} /></button>
             {viewMode === "canvas" && !page && <button className={`icon-button no-drag history-button ${historyOpen ? "active" : ""}`} aria-label={historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} title={historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} aria-pressed={historyOpen} onClick={() => setHistoryOpen((open) => !open)}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="8" cy="8" r="6" /><path d="M8 4.6V8l2.4 1.6" /></svg></button>}
             {viewMode === "canvas" && !page && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}
           </>
@@ -1320,18 +1578,32 @@ function App() {
       </div>
       {busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}
     </header>
+    <div ref={setWorkspaceToolbarHost} className="workspace-toolbar-host" />
     <div className="workspace">
-      <aside className={`sidebar${sidebarDocked ? (sidebarOpen ? "" : " closed") : " overlay-mode"}`} aria-hidden={sidebarDocked && !sidebarOpen ? true : undefined}>
-        {sidebarDocked ? (
-          <div className="sidebar-content">{sidebarInner}</div>
-        ) : (
-          sidebarSheetPresence.mounted && (
-            <>
-              <div className="sidebar-backdrop motion-fade" data-motion={sidebarSheetPresence.phase} onPointerDown={() => setSidebarOverlayOpen(false)} />
-              <div className="sidebar-sheet" data-motion={sidebarSheetPresence.phase}>{sidebarInner}</div>
-            </>
-          )
-        )}
+      <aside
+        className={`sidebar${sidebarPinned ? " is-pinned" : sidebarPeek ? " is-peeking" : " closed"}`}
+        aria-hidden={sidebarVisible ? undefined : true}
+        onPointerEnter={() => {
+          sidebarPointerInsideRef.current = true;
+          cancelPeekClose();
+          if (!sidebarPinnedRef.current) setSidebarPeek(true);
+        }}
+        onPointerLeave={() => {
+          sidebarPointerInsideRef.current = false;
+          schedulePeekClose();
+        }}
+        onFocus={() => {
+          if (sidebarPinnedRef.current) return;
+          cancelPeekClose();
+          setSidebarPeek(true);
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && (event.currentTarget.contains(next) || (next instanceof Element && next.closest(".sidebar-toggle")))) return;
+          schedulePeekClose();
+        }}
+      >
+        <div ref={sidebarContentRef} className="sidebar-content">{sidebarInner}</div>
       </aside>
       <div ref={workspaceMainRef} className="workspace-main">
         <div ref={workspaceViewRef} className="workspace-view" aria-hidden={page ? true : undefined}>
@@ -1339,6 +1611,7 @@ function App() {
             : viewMode === "library" ? (
               <LibraryView
                 state={state}
+                toolbarHost={page ? null : workspaceToolbarHost}
                 selectedIds={selectedContentIds}
                 onSelect={(contentId, toggle) => setSelectedContentIds((current) => applySelection(current, contentId, toggle))}
                 onClearSelection={() => setSelectedContentIds([])}
@@ -1362,7 +1635,7 @@ function App() {
                 onAddCategory={async () => { const name = await openPrompt("新建分类"); if (!name) return false; return update(() => window.imageBoard.createCategory(name)); }}
               />
             )}
-          {selectionPresence.mounted && selectionSnapshotRef.current.label !== "" && (
+          {viewMode !== "library" && selectionPresence.mounted && selectionSnapshotRef.current.label !== "" && (
             <div className={`selection-toolbar motion-fade`} data-motion={selectionPresence.phase}>
               <span>{selectionSnapshotRef.current.label}</span>
               {selectionSnapshotRef.current.canGroup && (
@@ -1393,6 +1666,9 @@ function App() {
               key={page.contentId}
               state={state}
               contentId={page.contentId}
+              toolbarHost={workspaceToolbarHost}
+              navigationGuardRef={pageNavigationGuardRef}
+              onOpenContent={(contentId) => openPage(contentId, page.origin)}
               onState={applyState}
               onClose={closePage}
               onCopy={(ids) => void copyContents(ids)}
@@ -1427,6 +1703,10 @@ function App() {
       />
     )}
     <ContextMenu
+      menu={createMenu ? buildCreateMenu(createMenu) : null}
+      onClose={() => setCreateMenu(null)}
+    />
+    <ContextMenu
       menu={cardMenu && cardMenuTarget?.frame ? {
         x: cardMenu.x,
         y: cardMenu.y,
@@ -1452,7 +1732,6 @@ function App() {
         x: topbarMenu.x,
         y: topbarMenu.y,
         items: [
-          { label: "打开设置", onSelect: () => switchView("settings") },
           ...(viewMode === "canvas" ? [
             { label: historyOpen ? "收起剪贴板历史" : "展开剪贴板历史", onSelect: () => setHistoryOpen((open) => !open) },
             { label: showControls ? "收起画布工具" : "展开画布工具", onSelect: () => setShowControls((visible) => !visible) },
@@ -1476,33 +1755,10 @@ function SettingsPage({ state, pathSettings, desktopSettings, canvasAppearance, 
   onAddCategory: () => Promise<boolean>;
   onDesktopSettingsChange: (patch: DesktopSettingsPatch) => void;
 }) {
-  const { theme } = useTheme();
   return <section className="settings-view">
     <div className="settings-heading">
       <div><h1>设置</h1><p>画布、剪贴板偏好与窗口行为都集中在这里，改动即时生效。</p></div>
     </div>
-    <section className="settings-section">
-      <div className="settings-section-heading"><div><strong>外观</strong><span>界面主题；切换后立即生效，并同步到托盘面板。</span></div></div>
-      <div className="theme-options">
-        {THEMES.map((option) => (
-          <label key={option.id} className={`theme-option ${theme === option.id ? "is-selected" : ""}`}>
-            <input type="radio" name="theme" value={option.id} checked={theme === option.id} onChange={() => setTheme(option.id)} />
-            <span className="theme-preview" data-theme={option.id} aria-hidden="true">
-              <span className="theme-preview-side">
-                <span className="theme-preview-bar is-active" />
-                <span className="theme-preview-bar" />
-                <span className="theme-preview-bar" />
-              </span>
-              <span className="theme-preview-main">
-                <span className="theme-preview-card" />
-                <span className="theme-preview-row" />
-              </span>
-            </span>
-            <span className="theme-option-copy"><strong>{option.label}</strong><small>{option.description}</small></span>
-          </label>
-        ))}
-      </div>
-    </section>
     <section className="settings-section">
       <div className="settings-section-heading"><div><strong>画布</strong><span>背景图案、网格与对齐方式。</span></div></div>
       <div className="settings-row">
@@ -1552,7 +1808,7 @@ function SettingsPage({ state, pathSettings, desktopSettings, canvasAppearance, 
         <input type="checkbox" checked={desktopSettings?.snapToGrid ?? false} disabled={!desktopSettings} onChange={(event) => onDesktopSettingsChange({ snapToGrid: event.target.checked })} />
         <span><b>网格对齐</b><small>开启后拖动与放置会吸附到网格；按住 Alt 可临时切换。</small></span>
       </label>
-      <p className="settings-note">背景颜色与图案只保存在本机；未手动选择背景时，画布默认色会跟随主题。网格间距与对齐用于画布操作。</p>
+      <p className="settings-note">背景颜色与图案只保存在本机；未手动选择背景时，画布使用默认的浅色底。网格间距与对齐用于画布操作。</p>
     </section>
     <section className="settings-section">
       <div className="settings-section-heading"><div><strong>剪贴板</strong><span>后台记录与历史保留策略。</span></div></div>
@@ -1574,6 +1830,7 @@ function SettingsPage({ state, pathSettings, desktopSettings, canvasAppearance, 
       <div className="settings-section-heading"><div><strong>窗口与启动</strong><span>关闭行为与开机自启动。</span></div></div>
       <ShellSettings />
     </section>
+    <ImageFileSettings />
     <section className="settings-section">
       <div className="settings-section-heading"><div><strong>分类类别</strong><span>分类会直接写入当前本地内容库。</span></div><button className="primary-button small-button" onClick={() => void onAddCategory()}>＋ 新建分类</button></div>
       <div className="category-list">{state.categories.map((category) => <span className="category-chip" key={category.id}>{category.name}</span>)}</div>
@@ -1590,6 +1847,8 @@ function Dialog({ dialog, motion, onClose }: { dialog: DialogState; motion: "ent
   const motionRef = useRef(motion);
   motionRef.current = motion;
   const [value, setValue] = useState(dialog.kind === "prompt" ? dialog.value : "");
+  const [validation, setValidation] = useState<{ dialog: DialogState; message: string } | null>(null);
+  const validationMessage = validation?.dialog === dialog ? validation.message : "";
   const [position, setPosition] = useState<PanelAnchor | null>(null);
   useLayoutEffect(() => {
     const card = cardRef.current;
@@ -1650,6 +1909,19 @@ function Dialog({ dialog, motion, onClose }: { dialog: DialogState; motion: "ent
     dialog.resolve(result as never);
     onClose();
   };
+  const submit = () => {
+    if (dialog.kind === "confirm") {
+      finish(true);
+      return;
+    }
+    const message = dialog.validate?.(value) ?? null;
+    if (message) {
+      setValidation({ dialog, message });
+      inputRef.current?.focus();
+      return;
+    }
+    finish(value);
+  };
   const handleKey = (event: React.KeyboardEvent) => {
     if (event.key === "Escape") {
       event.stopPropagation();
@@ -1657,7 +1929,38 @@ function Dialog({ dialog, motion, onClose }: { dialog: DialogState; motion: "ent
       finish(dialog.kind === "prompt" ? null : false);
     }
   };
-  return <div className="dialog-backdrop motion-fade" data-motion={motion} data-esc-layer onMouseDown={() => finish(dialog.kind === "prompt" ? null : false)}><section ref={cardRef} className="dialog-card motion-pop" data-motion={motion} data-esc-layer style={position ? { position: "absolute", left: position.left, top: position.top } : undefined} role="alertdialog" aria-modal="true" aria-label={dialog.title} onKeyDown={handleKey} onMouseDown={(event) => event.stopPropagation()}><strong>{dialog.title}</strong>{dialog.kind === "prompt" ? <input ref={inputRef} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") finish(value); if (event.key === "Escape") finish(null); }} /> : <p>{dialog.message}</p>}<div className="dialog-actions"><button ref={cancelRef} onClick={() => finish(dialog.kind === "prompt" ? null : false)}>取消</button><button className={dialog.kind === "confirm" ? "danger-button" : "primary-button"} onClick={() => finish(dialog.kind === "prompt" ? value : true)}>{dialog.kind === "confirm" ? "删除" : "确定"}</button></div></section></div>;
+  return <div className="dialog-backdrop motion-fade" data-motion={motion} data-esc-layer onMouseDown={() => finish(dialog.kind === "prompt" ? null : false)}>
+    <section
+      ref={cardRef}
+      className="dialog-card motion-pop"
+      data-motion={motion}
+      data-esc-layer
+      style={position ? { position: "absolute", left: position.left, top: position.top } : undefined}
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={dialog.title}
+      onKeyDown={handleKey}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <strong>{dialog.title}</strong>
+      {dialog.kind === "prompt" ? (
+        <>
+          <input
+            ref={inputRef}
+            value={value}
+            aria-invalid={validationMessage ? "true" : undefined}
+            onChange={(event) => { setValue(event.target.value); setValidation(null); }}
+            onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") submit(); if (event.key === "Escape") finish(null); }}
+          />
+          {validationMessage && <p className="dialog-error" role="alert">{validationMessage}</p>}
+        </>
+      ) : <p>{dialog.message}</p>}
+      <div className="dialog-actions">
+        <button ref={cancelRef} onClick={() => finish(dialog.kind === "prompt" ? null : false)}>取消</button>
+        <button className={dialog.kind === "confirm" ? "danger-button" : "primary-button"} onClick={submit}>{dialog.kind === "confirm" ? "删除" : "确定"}</button>
+      </div>
+    </section>
+  </div>;
 }
 
 export default App;

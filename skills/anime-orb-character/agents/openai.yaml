@@ -1,0 +1,4 @@
+interface:
+  display_name: "Anime Orb Character"
+  short_description: "Split character art into reusable animated floating-ball assets"
+  default_prompt: "Create or adapt a layered anime character orb asset pack from supplied character art."

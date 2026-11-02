@@ -68,6 +68,8 @@ export interface CanvasStageProps {
   onNodeActions(event: React.MouseEvent<HTMLElement> | null, nodeId: string): void;
   onCardMenu(event: React.MouseEvent<HTMLElement> | null, canvasId: string): void;
   onEdgeMenu(edgeId: string, clientX: number, clientY: number): void;
+  /** Right click on genuinely empty canvas space; nodes, cards, edges and the mini-map never call it. */
+  onCanvasContextMenu(clientX: number, clientY: number): void;
   onNodesMove(positions: Array<{ id: string; x: number; y: number }>): void;
   onNodesDrop(nodeIds: string[], cardId: string): void;
   onCardMove(canvasId: string, frame: CanvasFrame): void;
@@ -1103,7 +1105,13 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       onPointerUp={(event) => finishViewportGesture(event, true)}
       onPointerCancel={(event) => finishViewportGesture(event, false)}
       onLostPointerCapture={(event) => finishViewportGesture(event, true)}
-      onContextMenu={(event) => event.preventDefault()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        const target = event.target instanceof Element ? event.target : null;
+        if (target?.closest(".mini-map")) return;
+        if (propsRef.current.busy || panRef.current || selectRef.current || nodeDragRef.current || cardDragRef.current || connectRef.current) return;
+        propsRef.current.onCanvasContextMenu(event.clientX, event.clientY);
+      }}
     >
       <div ref={worldRef} className="canvas-world">
         <EdgeLayer

@@ -10,6 +10,8 @@ export interface ContentLifecycle {
 
 /** Imperative hooks a kind page registers with the page shell. */
 export interface ContentPageApi {
+  /** Unsaved image edits can ask before leaving the page. */
+  beforeClose?: () => boolean | Promise<boolean>;
   /** Persist pending edits; resolves when the save attempt settled. */
   flush?: () => void | Promise<void>;
   /** Close page-owned popups (link editor, bubble URL input); true when one closed. */

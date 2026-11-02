@@ -1,7 +1,7 @@
 /** Responsive shell breakpoints (logical px) and the pure bucket functions. */
 
 export const SIDEBAR_DOCK_MIN_WINDOW = 1100;
-/** Docked sidebar width; overlay mode rides at width 0 and gives it back. */
+/** Width a pinned sidebar occupies; a hover peek floats at width 0. */
 export const SIDEBAR_WIDTH = 248;
 export const DRAWER_WIDTH = 300;
 export const DRAWER_MIN_CANVAS = 480;
@@ -15,7 +15,11 @@ export type MinimapBucket = "wide" | "narrow";
 
 const finiteWidth = (width: number, fallback: number): number => (Number.isFinite(width) ? width : fallback);
 
-/** The sidebar docks beside the workspace on wide windows; below it rides the rail as an overlay. */
+/**
+ * Default sidebar posture before the user pins or unpins: wide windows start
+ * pinned beside the workspace, narrow windows start collapsed. An explicit
+ * choice is stored by the shell and overrides this bucket at every width.
+ */
 export function sidebarLayout(windowWidth: number): SidebarLayout {
   return finiteWidth(windowWidth, SIDEBAR_DOCK_MIN_WINDOW) >= SIDEBAR_DOCK_MIN_WINDOW ? "docked" : "overlay";
 }

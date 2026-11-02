@@ -41,6 +41,8 @@ pub enum ContentSource {
     Paste,
     Drop,
     Migrated,
+    /// Created from the canvas new-node menu.
+    Manual,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -180,6 +182,13 @@ pub struct ImportImagePayload {
     pub data: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageOpenResult {
+    pub state: AppState,
+    pub content_id: String,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportViewport {
@@ -195,6 +204,15 @@ pub struct ImportViewport {
 pub struct CanvasPoint {
     pub x: f64,
     pub y: f64,
+}
+
+/// Body of a content created from the canvas new-node menu.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NewContentInput {
+    Text,
+    RichText,
+    Link { url: String },
 }
 
 /// Destination for `showMainWindow` navigation.
@@ -241,6 +259,15 @@ pub struct ContentAsset {
 pub struct PasteResult {
     pub state: AppState,
     pub placed: bool,
+}
+
+/// Result of creating a content from the canvas new-node menu.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateContentNodeResult {
+    pub state: AppState,
+    pub content_id: String,
+    pub node_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

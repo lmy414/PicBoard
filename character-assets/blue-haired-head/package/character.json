@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "blue-haired-head",
+  "name": "Blue-haired Head (draft)",
+  "canvas": {
+    "width": 1254,
+    "height": 1254,
+    "headAnchor": [
+      627,
+      627
+    ]
+  },
+  "layers": {
+    "hairBack": {
+      "file": "layers/hair-back.png",
+      "z": 10,
+      "provenance": "generated"
+    },
+    "head": {
+      "file": "layers/head-base.png",
+      "z": 20,
+      "provenance": "reconstructed"
+    },
+    "eyesOpen": {
+      "file": "layers/eyes-open.png",
+      "z": 40,
+      "provenance": "generated"
+    },
+    "mouthNeutral": {
+      "file": "layers/mouth-neutral.png",
+      "z": 50,
+      "provenance": "generated"
+    },
+    "mouthOpen": {
+      "file": "layers/mouth-open.png",
+      "z": 51,
+      "provenance": "generated"
+    },
+    "hairFront": {
+      "file": "layers/hair-front.png",
+      "z": 30,
+      "provenance": "generated"
+    }
+  },
+  "states": {
+    "idle": [
+      "hairBack",
+      "head",
+      "hairFront",
+      "eyesOpen",
+      "mouthNeutral"
+    ],
+    "dragged": [
+      "hairBack",
+      "head",
+      "hairFront",
+      "eyesOpen",
+      "mouthNeutral"
+    ],
+    "receiving": [
+      "hairBack",
+      "head",
+      "hairFront",
+      "eyesOpen",
+      "mouthOpen"
+    ],
+    "success": [
+      "hairBack",
+      "head",
+      "hairFront",
+      "eyesOpen",
+      "mouthNeutral"
+    ]
+  },
+  "motion": {
+    "idle": {
+      "swayDeg": 2.4,
+      "bobPx": 2.5,
+      "blinkIntervalSec": [
+        2.2,
+        5.2
+      ],
+      "hairSwayDeg": 1.5
+    },
+    "dragged": {
+      "tiltDeg": 12,
+      "squash": 0.15,
+      "spring": 0.76,
+      "damping": 0.74
+    },
+    "receiving": {
+      "squash": 0.2,
+      "stretch": 0.08,
+      "spring": 0.82,
+      "damping": 0.7
+    },
+    "success": {
+      "bouncePx": 6,
+      "settleMs": 420
+    }
+  },
+  "notes": [
+    "Draft art generated or reconstructed from the supplied transparent reference image; not a pixel-exact layer extraction.",
+    "The source reference is cropped at canvas edges; hidden original pixels cannot be recovered from that file.",
+    "The front-hair layer is composed below eyes and mouth in the renderer to frame the head while keeping expressions readable."
+  ]
+}

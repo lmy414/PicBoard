@@ -21,6 +21,10 @@ try {
     $stage = Join-Path $release $name
     $zip = Join-Path $release "$name.zip"
     $manifest = Join-Path $release "$name.manifest.json"
+    $releasePrefix = [IO.Path]::GetFullPath($release).TrimEnd('\') + '\'
+    foreach ($artifactPath in @($stage, $zip, $manifest)) {
+        if (-not [IO.Path]::GetFullPath($artifactPath).StartsWith($releasePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Artifact path escapes release directory: $artifactPath" }
+    }
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
     if (Test-Path -LiteralPath $manifest) { Remove-Item -LiteralPath $manifest -Force }
@@ -45,8 +49,12 @@ PicBoard v$version / Windows x64 便携版
 
 这是未签名便携应用，不是安装器，也不包含自动更新器或固定 WebView2 运行时。
 开机自启动默认关闭。启用前请先固定程序目录；移动或删除程序前请先关闭自启动。
-托盘菜单可打开画板、显示悬浮球或完全退出。
+主窗口可记录剪贴板、整理画布和编辑图片；托盘菜单可打开 PicBoard 或退出。
+图片编辑默认保存独立副本，支持批注、裁剪、文字、马赛克、旋转和 PNG/JPEG/WebP 转换。
+左下角设置中的“图像打开方式”可以注册图片查看器，再由 Windows 默认应用页面确认关联。
+请在固定程序目录后设置默认图片应用；移动程序后需重新注册。
 用户图片和设置不包含在程序目录中，请自行备份重要数据。
+旧版 v0.1.2 数据会升级为 schema v2，升级前请先备份整个数据目录。旧版程序无法读取升级后的数据。
 目录选择只修改目录偏好，不会自动移动现有图库。
 
 为兼容旧版本，默认数据目录仍为：
@@ -71,6 +79,7 @@ PicBoard 源码采用 MIT License；第三方组件遵循 licenses 目录中的�
     $report = [pscustomobject]@{
         product = 'PicBoard'
         version = $version
+        sourceCommit = (& git rev-parse HEAD)
         platform = 'windows-x64'
         createdAt = (Get-Date).ToString('o')
         archive = [IO.Path]::GetFileName($zip)

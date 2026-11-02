@@ -2,7 +2,7 @@
 export type ContentKind = "text" | "richText" | "link" | "image";
 
 /** How a content first entered PicBoard. */
-export type ContentSource = "clipboard" | "paste" | "drop" | "migrated";
+export type ContentSource = "clipboard" | "paste" | "drop" | "migrated" | "manual";
 
 export interface ImageInfo {
   fileName: string;
@@ -218,7 +218,31 @@ export interface PluginListing {
   errors: Array<{ folder: string; message: string }>;
 }
 
+/**
+ * Body of a content created from the canvas new-node menu. Each call creates a
+ * fresh content; it never reuses a matching history item.
+ */
+export type NewContentInput =
+  | { kind: "text" }
+  | { kind: "richText" }
+  | { kind: "link"; url: string };
+
+/** The new node's content and placement, plus the state after the write. */
+export interface CreateContentNodeResult {
+  state: AppState;
+  contentId: string;
+  nodeId: string;
+}
+
 export interface ImageBoardApi {
+  readImage(contentId: string): Promise<{ data: number[]; mime: string }>;
+  saveImageCopy(image: ImportImagePayload): Promise<{ state: AppState; contentId: string }>;
+  exportImage(image: ImportImagePayload): Promise<string | null>;
+  openImageFile(): Promise<{ state: AppState; contentId: string } | null>;
+  takePendingImage(): Promise<{ state: AppState; contentId: string } | null>;
+  onImageOpened(listener: (result: { state: AppState; contentId: string }) => void): () => void;
+  getImageAssociation(): Promise<{ available: boolean; registered: boolean }>;
+  configureImageAssociation(): Promise<void>;
   loadState(): Promise<AppState>;
   /**
    * Host push after every mutation: command results from either window,
@@ -230,6 +254,17 @@ export interface ImageBoardApi {
   pasteClipboard(canvasId: string, viewport?: ImportViewport): Promise<{ state: AppState; placed: boolean }>;
   /** Place an existing content on a canvas; `center` is the node center in that canvas's world coordinates. The host may snap the node and relocate it to the nearest free spot so it never overlaps another node or card (GAP 16 px). */
   placeContent(contentId: string, canvasId: string, center: CanvasPoint): Promise<AppState>;
+  /**
+   * Create a fresh text/rich-text/link content and place its first node centered
+   * on `center` in that canvas's world coordinates. A new rich-text content
+   * starts as an empty rich document (never a plain-text body). The host snaps
+   * the node and relocates it to the nearest free spot like `placeContent`.
+   */
+  createContentNode(
+    canvasId: string,
+    center: CanvasPoint,
+    input: NewContentInput,
+  ): Promise<CreateContentNodeResult>;
   setActiveCanvas(canvasId: string): Promise<AppState>;
   setCanvasViewport(canvasId: string, viewport: CanvasViewport): Promise<AppState>;
   createCanvas(parentId?: string | null, frame?: CanvasFrame): Promise<AppState>;

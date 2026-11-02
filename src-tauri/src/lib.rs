@@ -20,6 +20,7 @@ mod commands;
 mod desktop;
 mod dto;
 mod error;
+mod image_files;
 mod paths;
 mod platform;
 mod plugins;
@@ -166,6 +167,15 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     let storage: SharedStorage = Arc::new(Mutex::new(store));
     app.manage(storage.clone());
+    let args: Vec<String> = std::env::args().collect();
+    let mut paths = image_files::paths_from_args(&args, &std::env::current_dir()?);
+    paths.extend(std::mem::take(&mut *app.state::<image_files::PendingImage>().paths.lock().unwrap_or_else(|p| p.into_inner())));
+    for path in paths {
+        match image_files::open_path(app.handle(), &path) {
+            Ok(result) => *app.state::<image_files::PendingImage>().content_id.lock().unwrap_or_else(|p| p.into_inner()) = Some(result.content_id),
+            Err(error) => eprintln!("[image-open] {error}"),
+        }
+    }
 
     let window_controller = WindowController::new(app.handle().clone());
     app.manage(window_controller.clone());
@@ -323,6 +333,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .manage(image_files::PendingImage::default())
         // Image bytes are served by this scheme (`convertFileSrc` on the
         // renderer side builds `http://picboard.localhost/thumb%2F<id>`).
         // Requests are queued to a fixed worker pool, so decoding and thumbnail
@@ -335,13 +346,22 @@ pub fn run() {
                 responder,
             );
         })
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| image_files::receive_args(app, args, cwd)))
         .plugin(tauri_plugin_dialog::init())
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap_preferences,
             commands::load_state,
+            image_files::read_image,
+            image_files::save_image_copy,
+            image_files::export_image,
+            image_files::open_image_file,
+            image_files::take_pending_image,
+            desktop::image_association::get_image_association,
+            desktop::image_association::configure_image_association,
             commands::paste_clipboard,
             commands::place_content,
+            commands::create_content_node,
             commands::set_active_canvas,
             commands::set_canvas_viewport,
             commands::create_canvas,
@@ -379,7 +399,16 @@ pub fn run() {
             commands::set_desktop_settings,
             commands::pick_directory,
         ]);
+    let mut context = tauri::generate_context!();
+    // Isolated dev/test data roots get independent single-instance channels.
+    // A release with normal user data always keeps its stable application id.
+    if let Some(root) = data_root_override() {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        root.hash(&mut hasher);
+        context.config_mut().identifier = format!("com.quickimageboard.isolated.{:x}", hasher.finish());
+    }
     builder
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("failed to run PicBoard");
 }

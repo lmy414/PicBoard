@@ -3,13 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import TrayPanel from "./tray/TrayPanel";
 import { bootstrapImageBoard, reportReady } from "./platform/bootstrap";
-import { applyTheme, readTheme, startThemeSync } from "./ui/theme";
 import "./styles.css";
-
-// Resolve the theme before the first React paint (both the main window and the
-// tray flyout) so a stored neumorphism preference never flashes the default.
-applyTheme(readTheme());
-startThemeSync();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("找不到应用挂载节点");

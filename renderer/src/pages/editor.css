@@ -116,10 +116,8 @@
 .cp-editor-content hr {
   margin: 1.7em 0;
   border: 0;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--surface-sunken);
-  box-shadow: 0 1px 0 var(--line);
+  height: 1px;
+  background: var(--line);
 }
 
 .cp-editor-content a {
@@ -276,12 +274,11 @@
   padding: 0 16px;
   border-radius: var(--radius-s);
   background: var(--accent);
-  box-shadow: var(--elev-1);
   color: #fff;
   font-size: 12px;
 }
-.cp-retry:hover:not(:disabled) { box-shadow: var(--elev-2), var(--accent-glow); }
-.cp-retry:active:not(:disabled) { box-shadow: var(--elev-inset-sm); }
+.cp-retry:hover:not(:disabled) { background: var(--accent-ink); }
+.cp-retry:active:not(:disabled) { background: var(--accent-ink); }
 
 /* ---- slash menu -------------------------------------------------------- */
 .cp-slash-menu {
@@ -324,10 +321,9 @@
   color: var(--text);
   font-size: 12.5px;
 }
-.cp-slash-item:hover { background: var(--surface-hover); box-shadow: var(--elev-inset-sm); }
+.cp-slash-item:hover { background: var(--surface-hover); }
 .cp-slash-item.active {
   background: var(--surface-pressed);
-  box-shadow: var(--elev-inset-sm);
 }
 
 .cp-slash-icon {
@@ -404,12 +400,10 @@
 }
 .cp-bubble-button:hover {
   background: var(--surface-hover);
-  box-shadow: var(--elev-inset-sm);
   color: var(--text);
 }
 .cp-bubble-button.active {
   background: var(--surface-pressed);
-  box-shadow: var(--elev-inset-sm);
   color: var(--accent-ink);
 }
 
@@ -437,28 +431,28 @@
   width: 230px;
   height: 28px;
   padding: 0 8px;
-  border: 0;
+  border: var(--edge);
   border-radius: var(--radius-s);
   background: var(--surface-input);
-  box-shadow: var(--elev-inset-sm);
+  box-shadow: none;
   color: var(--text);
   font-size: 12px;
+  outline: none;
 }
 .cp-bubble-link-input::placeholder { color: var(--text-faint); }
-.cp-bubble-link-input:focus { background: var(--surface-input-focus); box-shadow: var(--focus-ring-inset); }
-.cp-bubble-link-input[aria-invalid="true"] { box-shadow: var(--danger-ring); }
+.cp-bubble-link-input:focus { background: var(--surface-input-focus); border-color: var(--accent); box-shadow: none; }
+.cp-bubble-link-input[aria-invalid="true"] { border-color: var(--danger); box-shadow: none; }
 
 .cp-bubble-link-apply {
   height: 28px;
   padding: 0 10px;
   border-radius: var(--radius-s);
   background: var(--accent);
-  box-shadow: var(--elev-1);
   color: #fff;
   font-size: 12px;
 }
-.cp-bubble-link-apply:hover { box-shadow: var(--elev-2), var(--accent-glow); }
-.cp-bubble-link-apply:active { box-shadow: var(--elev-inset-sm); }
+.cp-bubble-link-apply:hover { background: var(--accent-ink); }
+.cp-bubble-link-apply:active { background: var(--accent-ink); }
 
 .cp-bubble-error {
   position: absolute;

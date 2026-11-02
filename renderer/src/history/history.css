@@ -97,8 +97,6 @@
   white-space: nowrap;
 }
 .hist-record:hover { color: var(--text); }
-.hist-record:hover .hist-switch { box-shadow: var(--elev-hover); }
-.hist-record:active .hist-switch { box-shadow: var(--elev-inset-sm); }
 .hist-record.is-paused { color: var(--text-faint); }
 
 .hist-switch {
@@ -138,13 +136,14 @@
   min-width: 0;
   height: 30px;
   padding: 0 5px 0 8px;
+  border: var(--edge);
   border-radius: var(--radius-s);
   background: var(--surface-input);
-  box-shadow: var(--elev-inset-sm);
+  box-shadow: none;
   color: var(--text-faint);
-  transition: box-shadow var(--motion-fast) var(--motion-ease-out);
+  transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
 }
-.hist-search:focus-within { background: var(--surface-input-focus); box-shadow: var(--focus-ring-inset); }
+.hist-search:focus-within { background: var(--surface-input-focus); border-color: var(--accent); box-shadow: none; }
 .hist-search svg { flex: 0 0 auto; }
 .hist-search input {
   flex: 1 1 auto;

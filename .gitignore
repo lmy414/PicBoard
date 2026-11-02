@@ -1,5 +1,7 @@
 node_modules/
 dist/
+playwright-report/
+test-results/
 release/
 *.log
 src-tauri/target/

@@ -429,6 +429,7 @@ fn parse_content(key: &str, value: &Value) -> Result<ContentRecord, AppError> {
         Some("paste") => ContentSource::Paste,
         Some("drop") => ContentSource::Drop,
         Some("migrated") => ContentSource::Migrated,
+        Some("manual") => ContentSource::Manual,
         // Older/hand-written records without a source are treated as migrated
         // so retention never mistakes them for fresh captures.
         _ => ContentSource::Migrated,

@@ -9,8 +9,8 @@
 use crate::clipboard::{self, CopyContent};
 use crate::dto::{
     AppState, CanvasFrame, CanvasPoint, CanvasViewport, ContentAsset, ContentBody, CopyResult,
-    DesktopSettingsDto, ImportImagePayload, ImportViewport, MainNavigation, NodeMove, PasteResult,
-    PluginListing,
+    CreateContentNodeResult, DesktopSettingsDto, ImportImagePayload, ImportViewport,
+    MainNavigation, NewContentInput, NodeMove, PasteResult, PluginListing,
 };
 use crate::error::AppError;
 use crate::preferences::{PreferenceStore, BALL_SETTINGS_KEY, PATH_SETTINGS_KEY};
@@ -68,6 +68,21 @@ pub fn place_content(
     })?;
     broadcast(&app, &state);
     Ok(state)
+}
+
+#[tauri::command]
+pub fn create_content_node(
+    app: AppHandle,
+    storage: State<'_, SharedStorage>,
+    canvas_id: String,
+    center: CanvasPoint,
+    input: NewContentInput,
+) -> Result<CreateContentNodeResult, AppError> {
+    let result = with_storage(&storage, |store| {
+        store.create_content_node(&canvas_id, center, input)
+    })?;
+    broadcast(&app, &result.state);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -370,7 +385,7 @@ pub fn open_external_url(url: String) -> Result<(), AppError> {
 }
 
 #[cfg(windows)]
-fn open_in_shell(url: &str) -> Result<(), AppError> {
+pub(crate) fn open_in_shell(url: &str) -> Result<(), AppError> {
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -401,7 +416,7 @@ fn open_in_shell(url: &str) -> Result<(), AppError> {
 }
 
 #[cfg(not(windows))]
-fn open_in_shell(_url: &str) -> Result<(), AppError> {
+pub(crate) fn open_in_shell(_url: &str) -> Result<(), AppError> {
     Err(AppError::message("当前平台不支持打开外部链接"))
 }
 

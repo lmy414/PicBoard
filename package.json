@@ -1,6 +1,6 @@
 {
   "name": "picboard",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Windows 悬浮图片收集与本地画板",
   "license": "MIT",
@@ -23,7 +23,8 @@
     "test:node": "node --test tests/*.test.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test": "npm run test:node && npm run test:components && npm run test:rust",
-    "test:components": "vitest run"
+    "test:components": "vitest run",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.8.0",
@@ -43,6 +44,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^22.10.2",

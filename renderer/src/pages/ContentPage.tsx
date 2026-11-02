@@ -1,9 +1,12 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AppState } from "../../../shared/image-board";
-import { KIND_LABEL, buildPlacementIndex, formatTimestamp, relativeTime } from "../content/content-meta";
+import { KIND_LABEL, buildPlacementIndex, contentTitle, formatByteSize, formatTimestamp, relativeTime } from "../content/content-meta";
 import { IconArrowLeft, IconCanvas, IconCopy, IconTag, KindIcon } from "../ui/ContentIcons";
-import { IconDots } from "../ui/Icons";
+import { IconDots, IconInfo } from "../ui/Icons";
+import { Popover } from "../ui/Popover";
 import { ImageContentPage } from "./ImageContentPage";
+import { ImageEditor } from "./ImageEditor";
 import { LinkContentPage } from "./LinkContentPage";
 import type { ContentLifecycle, ContentPageApi, SaveStatus } from "./page-types";
 import "./content-page.css";
@@ -35,6 +38,10 @@ function EditorFallback() {
 export interface ContentPageProps {
   state: AppState;
   contentId: string;
+  /** Shared compact toolbar above the workspace; null temporarily hides it. */
+  toolbarHost?: HTMLElement | null;
+  navigationGuardRef?: React.MutableRefObject<(() => boolean | Promise<boolean>) | null>;
+  onOpenContent?(contentId: string): void;
   onState(state: AppState): void;
   onClose(): void;
   onCopy(contentIds: string[]): void;
@@ -111,6 +118,16 @@ export function ContentPage(props: ContentPageProps) {
   const closingRef = useRef(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [now, setNow] = useState(() => Date.now());
+  const [infoOpen, setInfoOpen] = useState(false);
+  const infoButtonRef = useRef<HTMLButtonElement>(null);
+  const [imageToolbarHost, setImageToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [editingImage, setEditingImage] = useState(false);
+
+  useEffect(() => {
+    const guard = () => apiRef.current.beforeClose?.() ?? true;
+    if (props.navigationGuardRef) props.navigationGuardRef.current = guard;
+    return () => { if (props.navigationGuardRef?.current === guard) props.navigationGuardRef.current = null; };
+  }, [props.navigationGuardRef]);
 
   // A removed content must never be saved again. This is read by the kind
   // page's unmount cleanup, which runs before effects of this render.
@@ -131,6 +148,7 @@ export function ContentPage(props: ContentPageProps) {
   const closePage = useCallback(async () => {
     if (closingRef.current) return;
     closingRef.current = true;
+    if (await apiRef.current.beforeClose?.() === false) { closingRef.current = false; return; }
     try {
       await apiRef.current.flush?.();
     } catch {
@@ -190,10 +208,9 @@ export function ContentPage(props: ContentPageProps) {
     onSaveStatus: setSaveStatus,
   };
 
-  return (
-    <div className={`cp-page cp-page-${content.kind}`}>
-      <header className="cp-header">
-        <div className="cp-header-top">
+  const toolbar = (
+      <div className="cp-toolbar" role="toolbar" aria-label="内容工具">
+        {props.toolbarHost === undefined && (
           <button
             className="cp-back"
             title="返回 (Esc)"
@@ -202,6 +219,7 @@ export function ContentPage(props: ContentPageProps) {
             <IconArrowLeft size={15} />
             <span>返回</span>
           </button>
+        )}
           <span className="cp-kind-chip">
             <KindIcon kind={content.kind} size={13} />
             {KIND_LABEL[content.kind]}
@@ -212,7 +230,10 @@ export function ContentPage(props: ContentPageProps) {
               {category.name}
             </span>
           ) : null}
-          <span className="cp-header-grow" />
+          <button type="button" ref={infoButtonRef} className={`cp-action cp-info-trigger${infoOpen ? " active" : ""}`} title="内容信息" aria-label="内容信息" aria-expanded={infoOpen} aria-haspopup="dialog" onClick={() => setInfoOpen((open) => !open)}><IconInfo size={14} /><span>信息</span></button>
+          <span className="cp-toolbar-grow" />
+          {content.kind === "image" && <div ref={setImageToolbarHost} className="cp-image-tools-host" />}
+          {content.kind === "image" && <button type="button" className="cp-action" onClick={() => { setInfoOpen(false); setEditingImage(true); }}>编辑图像</button>}
           {editable ? <SaveStatusChip status={saveStatus} /> : null}
           <button className="cp-action" onClick={() => props.onCopy([content.id])} title="复制到剪贴板" aria-label="复制">
             <IconCopy size={14} />
@@ -227,16 +248,23 @@ export function ContentPage(props: ContentPageProps) {
           >
             <IconDots size={16} />
           </button>
-        </div>
-        <div className="cp-header-meta">
+      </div>
+  );
+
+  return (
+    <div className={`cp-page cp-page-${content.kind}`}>
+      {!editingImage && (props.toolbarHost ? createPortal(toolbar, props.toolbarHost) : props.toolbarHost === undefined ? toolbar : null)}
+      <Popover open={infoOpen} anchor={infoButtonRef.current} onClose={() => setInfoOpen(false)} width={320} className="cp-info-panel" panelProps={{ role: "dialog", "aria-label": "内容信息" }}>
+        <strong className="cp-info-title">{contentTitle(content)}</strong>
+        {content.image && <div className="cp-info-image"><span>{content.image.width} × {content.image.height}</span><span>{formatByteSize(content.image.byteSize)}</span></div>}
+        <div className="cp-info-times">
           <span className="cp-time" title={formatTimestamp(content.createdAt)}>
             创建于 {relativeTime(content.createdAt, now)}
           </span>
-          <span className="cp-meta-dot">·</span>
           <span className="cp-time" title={formatTimestamp(content.updatedAt)}>
             编辑于 {relativeTime(content.updatedAt, now)}
           </span>
-          <span className="cp-meta-dot">·</span>
+        </div>
           {canvasNames.length > 0 ? (
             <span className="cp-placements">
               <IconCanvas size={12} />
@@ -247,7 +275,7 @@ export function ContentPage(props: ContentPageProps) {
                     key={canvas.id}
                     className="cp-canvas-chip"
                     title={`在画布「${canvas.name}」中查看`}
-                    onClick={() => props.onOpenCanvas(canvas.id, content.id)}
+                    onClick={() => { setInfoOpen(false); props.onOpenCanvas(canvas.id, content.id); }}
                   >
                     {canvas.name}
                   </button>
@@ -260,12 +288,13 @@ export function ContentPage(props: ContentPageProps) {
               仅在剪贴板历史中
             </span>
           )}
-        </div>
-      </header>
+      </Popover>
 
       <div className="cp-body">
-        {content.kind === "image" ? (
-          <ImageContentPage content={content} onError={props.onError} />
+        {content.kind === "image" && editingImage ? (
+          <ImageEditor content={content} toolbarHost={props.toolbarHost} apiRef={apiRef} onCancel={() => setEditingImage(false)} onSaved={(result) => { props.onState(result.state); setEditingImage(false); props.onNotice("已保存图片副本，原图保留"); props.onOpenContent?.(result.contentId); }} onError={props.onError} onNotice={props.onNotice} />
+        ) : content.kind === "image" ? (
+          <ImageContentPage key={content.id} content={content} onError={props.onError} toolbarHost={imageToolbarHost} />
         ) : content.kind === "link" ? (
           <LinkContentPage
             key={content.id}

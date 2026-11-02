@@ -13,6 +13,7 @@
 
 mod autostart;
 mod host;
+pub mod image_association;
 mod picker;
 mod prefs;
 mod tray;

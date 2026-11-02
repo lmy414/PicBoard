@@ -49,8 +49,13 @@ interface ImageItem {
 }
 
 /** Editor output in the exact shape the host stores. */
-function snapshotOf(editor: Editor): ContentBody {
+function snapshotOf(editor: Editor, richRef: MutableRefObject<boolean>): ContentBody {
   const json = editor.getJSON();
+  const plain = isPlainDoc(json);
+  // Formatting (or any non-plain block) is an automatic promotion: once the
+  // content has been rich, a later plain snapshot (removed marks, cleared
+  // document) must not demote it again.
+  if (!plain) richRef.current = true;
   return {
     // TipTap's default text serializer drops hard breaks; keep them as newlines
     // so plain content never loses Shift+Enter line breaks.
@@ -58,7 +63,10 @@ function snapshotOf(editor: Editor): ContentBody {
       blockSeparator: "\n",
       textSerializers: { hardBreak: () => "\n", image: () => "[图片]" },
     }),
-    html: isPlainDoc(json) ? null : editor.getHTML(),
+    // The host treats `html: null` as plain text. A rich content therefore
+    // keeps sending HTML even when the document is empty or only paragraphs;
+    // otherwise typing the first plain character would demote it.
+    html: plain && !richRef.current ? null : editor.getHTML(),
   };
 }
 
@@ -83,6 +91,11 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
   const mountedRef = useRef(true);
   const contentIdRef = useRef(content.id);
   contentIdRef.current = content.id;
+  // Richness is learned once and only promoted: the record kind, a loaded HTML
+  // body or formatting all keep it true. Never let a stale text-kind update
+  // sent before formatting demote an editor that has already gone rich.
+  const richRef = useRef(content.kind === "richText");
+  if (content.kind === "richText") richRef.current = true;
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
   const lastSavedRef = useRef<SavedSnapshot | null>(null);
@@ -203,7 +216,7 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
     const instance = editorRef.current;
     if (!instance || !readyRef.current || !dirtyRef.current) return;
     const version = versionRef.current;
-    const next = snapshotOf(instance);
+    const next = snapshotOf(instance, richRef);
     const saved = lastSavedRef.current;
     if (saved && saved.text === next.text && saved.html === next.html) {
       dirtyRef.current = false;
@@ -411,6 +424,7 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
   // Creating the editor with the loaded document keeps reload out of history.
   useEffect(() => {
     if (!body) return;
+    if (body.html !== null) richRef.current = true;
     let instance: Editor;
     try {
       instance = createEditor(body);
@@ -420,7 +434,7 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
     }
     editorRef.current = instance;
     readyRef.current = true;
-    lastSavedRef.current = snapshotOf(instance);
+    lastSavedRef.current = snapshotOf(instance, richRef);
     dirtyRef.current = false;
     setEditor(instance);
     applySaveStatus("saved");
@@ -432,7 +446,7 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
       }
       readyRef.current = false;
       editorRef.current = null;
-      const pending = dirtyRef.current && !lifecycle.discard ? snapshotOf(instance) : null;
+      const pending = dirtyRef.current && !lifecycle.discard ? snapshotOf(instance, richRef) : null;
       const saved = lastSavedRef.current;
       instance.destroy();
       setEditor(null);
@@ -451,6 +465,14 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
     // The editor is rebuilt only when a new body snapshot arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body, extensions]);
+
+  // Focus the body at its end once the editor is mounted so the user can type
+  // immediately. This depends on the editor instance, not on content data:
+  // later re-renders must not steal focus from the toolbar or move the caret.
+  useEffect(() => {
+    if (!editor) return;
+    editor.commands.focus("end", { scrollIntoView: false });
+  }, [editor]);
 
   function createEditor(initial: ContentBody): Editor {
     return new Editor({

@@ -88,6 +88,18 @@ impl ImageBoardStorage {
         }
     }
 
+    fn text_like_hash(
+        kind: ContentKind,
+        text: &str,
+        html: Option<&str>,
+        url: Option<&str>,
+    ) -> String {
+        match kind {
+            ContentKind::Link => hash_bytes(kind.token(), url.unwrap_or_default().as_bytes()),
+            _ => hash_text(kind, text, html),
+        }
+    }
+
     /// Create (or reuse) a text/rich-text/link content. Links own no files.
     pub(crate) fn ingest_text_like(
         &mut self,
@@ -97,12 +109,7 @@ impl ImageBoardStorage {
         url: Option<String>,
         source: ContentSource,
     ) -> Result<Ingested, AppError> {
-        let hash = match kind {
-            ContentKind::Link => {
-                hash_bytes(kind.token(), url.as_deref().unwrap_or_default().as_bytes())
-            }
-            _ => hash_text(kind, &text, html.as_deref()),
-        };
+        let hash = Self::text_like_hash(kind, &text, html.as_deref(), url.as_deref());
         if let Some(id) = self.newest_matching(&hash) {
             self.touch(&id);
             return Ok(Ingested {
@@ -110,7 +117,32 @@ impl ImageBoardStorage {
                 files: Vec::new(),
             });
         }
+        self.insert_text_like(kind, text, html, url, source, hash)
+    }
 
+    /// Create a fresh text/rich-text/link content. Manual creation must never
+    /// reuse an existing content, even for an identical payload.
+    pub(crate) fn create_text_like(
+        &mut self,
+        kind: ContentKind,
+        text: String,
+        html: Option<String>,
+        url: Option<String>,
+        source: ContentSource,
+    ) -> Result<Ingested, AppError> {
+        let hash = Self::text_like_hash(kind, &text, html.as_deref(), url.as_deref());
+        self.insert_text_like(kind, text, html, url, source, hash)
+    }
+
+    fn insert_text_like(
+        &mut self,
+        kind: ContentKind,
+        text: String,
+        html: Option<String>,
+        url: Option<String>,
+        source: ContentSource,
+        hash: String,
+    ) -> Result<Ingested, AppError> {
         let id = Uuid::new_v4().to_string();
         let mut created = Vec::new();
         let mut cover_asset = None;
@@ -120,7 +152,7 @@ impl ImageBoardStorage {
                 write_atomic_bytes(&text_path, text.as_bytes())?;
                 created.push(text_path);
                 if let Some(html) = html.as_deref() {
-                    // The hash above is over the captured HTML, so identical
+                    // The hash is over the captured HTML, so identical
                     // re-captures still dedupe after localization rewrites ids.
                     let stored = if kind == ContentKind::RichText {
                         let (localized, copies) =
@@ -187,6 +219,16 @@ impl ImageBoardStorage {
             });
         }
 
+        self.create_image(requested_name, bytes, source)
+    }
+
+    pub(crate) fn create_image(
+        &mut self,
+        requested_name: Option<&str>,
+        bytes: &[u8],
+        source: ContentSource,
+    ) -> Result<Ingested, AppError> {
+        let hash = hash_bytes(ContentKind::Image.token(), bytes);
         let id = Uuid::new_v4().to_string();
         let requested = requested_name.map(str::trim).unwrap_or_default();
         // Store the file under the user-visible name so copying it out

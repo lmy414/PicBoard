@@ -1,140 +1,74 @@
 /* ---- design tokens ---------------------------------------------------------
-Two themes share one semantic token set. Component CSS reads only the
-semantic names below;
-the historical --canvas/--ink/--shadow-*/--radius-*
-names stay mapped as aliases at the end of this block. */
-:root,
-:root[data-theme="clean"],
-[data-theme="clean"]{
+One warm-paper palette. Component CSS reads only the semantic names below;
+the historical --canvas/--ink/--shadow-* names stay mapped as aliases in this
+same block. */
+:root{
   /* surfaces */
-  --surface-app: #f7f7f5;
+  --surface-app: #fafaf9;
   --surface-panel: #ffffff;
   --surface-raised: #ffffff;
-  --surface-canvas: #fbfbfa;
-  --surface-sunken: #ececea;
-  --surface-input: #ececea;
+  --surface-canvas: #ffffff;
+  --canvas-bg: #ffffff;
+  --canvas-pattern: rgba(32, 36, 33, .1);
+  --surface-sunken: #f2f3f2;
+  --surface-input: #f2f3f2;
   --surface-input-focus: #ffffff;
-  --surface-hover: #efefee;
-  --surface-hover-strong: #efefee;
-  --surface-pressed: #efefee;
-  --surface-press-fill: #efefee;
+  --surface-hover: #edefeb;
+  --surface-hover-strong: #e6eae5;
+  --surface-pressed: #e8ebe7;
+  --surface-press-fill: #e8ebe7;
   --fade-panel: rgba(255, 255, 255, 0);
-  --scrim: rgba(15, 15, 15, .18);
+  --scrim: rgba(255, 255, 255, .6);
   /* text */
-  --text: #37352f;
-  --text-strong: #1f1e1c;
-  --text-muted: #5f5e5a;
-  --text-faint: #6f6e6a;
+  --text: #202421;
+  --text-strong: #171a18;
+  --text-muted: #616862;
+  --text-faint: #7a817b;
   /* lines, elevation and rings */
-  --line: #e9e9e7;
-  --line-strong: #d8d7d3;
+  --line: #e2e5e1;
+  --line-strong: #c6ccc6;
   --edge: 1px solid var(--line);
-  --elev-1: 0 0 0 1px var(--line), 0 1px 2px rgba(15, 15, 15, .03), 0 1px 6px rgba(15, 15, 15, .04);
-  --elev-2: 0 0 0 1px var(--line), 0 2px 8px rgba(15, 15, 15, .08);
-  --elev-3: 0 8px 24px rgba(15, 15, 15, .13);
-  --elev-surface-lg: 0 0 0 1px var(--line), 0 2px 8px rgba(15, 15, 15, .08);
-  --elev-hover-sm: 0 0 0 1px var(--line-strong), 0 2px 8px rgba(15, 15, 15, .08);
-  --elev-hover: 0 0 0 1px var(--line-strong), 0 2px 8px rgba(15, 15, 15, .08), 0 1px 6px rgba(15, 15, 15, .04);
-  --elev-inset: none;
+  --elev-1: 0 0 0 1px var(--line), 0 1px 2px rgba(20, 28, 22, .04);
+  --elev-2: 0 0 0 1px var(--line), 0 2px 8px rgba(20, 28, 22, .07);
+  --elev-3: 0 8px 24px rgba(20, 28, 22, .12);
+  --elev-surface-lg: 0 0 0 1px var(--line), 0 2px 8px rgba(20, 28, 22, .07);
+  --elev-hover-sm: none;
+  --elev-hover: 0 0 0 1px var(--line-strong), 0 2px 8px rgba(20, 28, 22, .07);
+  --elev-inset: 0 0 0 1px var(--line);
   --elev-inset-sm: none;
   --elev-header: inset 0 -1px 0 var(--line);
   --elev-header-soft: inset 0 -1px 0 var(--line);
   --elev-dock: inset -1px 0 0 var(--line);
-  --elev-dock-right: 0 0 0 1px var(--line), -12px 0 28px rgba(15, 15, 15, .06);
+  --elev-dock-right: 0 0 0 1px var(--line), -12px 0 28px rgba(20, 28, 22, .06);
   --focus-ring: 0 0 0 1.5px var(--accent);
   --focus-ring-inset: 0 0 0 1.5px var(--accent);
   --danger-ring: 0 0 0 1.5px var(--danger);
-  --accent-glow: 0 0 0 4px rgba(35, 131, 226, .16);
+  --accent-glow: 0 0 0 3px rgba(35, 133, 107, .12);
   /* palette */
-  --accent: #2383e2;
-  --accent-ink: #1765b0;
-  --accent-soft: #e8f2fc;
-  --accent-line: rgba(35, 131, 226, .35);
-  --accent-wash: rgba(35, 131, 226, .1);
-  --success: #2e7d5b;
-  --success-soft: #e6f3ec;
-  --danger: #c0392b;
-  --danger-soft: #fdecea;
-  --warning-soft: #fbf3db;
-  --warning-border: #e9d9a8;
+  --accent: #23856b;
+  --accent-ink: #1b6b56;
+  --accent-soft: #e7f2ee;
+  --accent-line: rgba(35, 133, 107, .35);
+  --accent-wash: rgba(35, 133, 107, .1);
+  --success: #23856b;
+  --success-soft: #e7f2ee;
+  --danger: #b84646;
+  --danger-soft: #f9ecea;
+  --warning-soft: #fdf3e3;
+  --warning-border: #ecd9b8;
   --warning-ink: #7a5b14;
   --relation-line: #c9c8c3;
-  --scrollbar-thumb: rgba(15, 15, 15, .16);
-  --scrollbar-thumb-hover: rgba(15, 15, 15, .28);
+  --scrollbar-thumb: rgba(32, 36, 33, .16);
+  --scrollbar-thumb-hover: rgba(32, 36, 33, .28);
   /* radii */
-  --radius-s: 6px;
-  --radius-m: 8px;
-  --radius-l: 10px;
-}
-/* 新拟物: paired light/dark soft shadows instead of hard borders. Values are
-the pre-theme soft-UI look, kept intact as one selectable theme. */
-:root[data-theme="neumorphism"],
-[data-theme="neumorphism"]{
-  --surface-app: #e8ecf1;
-  --surface-panel: #e8ecf1;
-  --surface-raised: #e8ecf1;
-  --surface-canvas: #e8ecf1;
-  --surface-sunken: #dde3ea;
-  --surface-input: #dde3ea;
-  --surface-input-focus: #e8ecf1;
-  --surface-hover: #e8ecf1;
-  --surface-hover-strong: #dde3ea;
-  --surface-pressed: #dde3ea;
-  --surface-press-fill: #e8ecf1;
-  --fade-panel: rgba(232, 236, 241, 0);
-  --scrim: rgba(43, 54, 66, .3);
-  --text: #39434f;
-  --text-strong: #272f3a;
-  --text-muted: #54606e;
-  --text-faint: #6c7885;
-  --line: rgba(163, 177, 198, .4);
-  --line-strong: rgba(147, 161, 184, .75);
-  --edge: 1px solid rgba(255, 255, 255, .55);
-  --elev-1: 3px 3px 6px rgba(163, 177, 198, .55), -3px -3px 6px rgba(255, 255, 255, .85);
-  --elev-2: 6px 6px 12px rgba(163, 177, 198, .55), -6px -6px 12px rgba(255, 255, 255, .85);
-  --elev-3: 12px 12px 24px rgba(163, 177, 198, .55), -12px -12px 24px rgba(255, 255, 255, .85);
-  --elev-surface-lg: 12px 12px 24px rgba(163, 177, 198, .55), -12px -12px 24px rgba(255, 255, 255, .85);
-  --elev-hover-sm: 3px 3px 6px rgba(163, 177, 198, .55), -3px -3px 6px rgba(255, 255, 255, .85);
-  --elev-hover: 6px 6px 12px rgba(163, 177, 198, .55), -6px -6px 12px rgba(255, 255, 255, .85);
-  --elev-inset: inset 3px 3px 6px rgba(163, 177, 198, .55), inset -3px -3px 6px rgba(255, 255, 255, .85);
-  --elev-inset-sm: inset 2px 2px 4px rgba(163, 177, 198, .55), inset -2px -2px 4px rgba(255, 255, 255, .85);
-  --elev-header: 0 6px 12px -8px rgba(147, 161, 184, .55);
-  --elev-header-soft: 0 6px 12px -8px rgba(147, 161, 184, .45);
-  --elev-dock: 6px 0 14px -8px rgba(147, 161, 184, .55);
-  --elev-dock-right: -12px 0 28px rgba(163, 177, 198, .55), inset 1px 0 0 rgba(255, 255, 255, .85);
-  --focus-ring: 0 0 0 1.5px var(--accent);
-  --focus-ring-inset: inset 2px 2px 4px rgba(163, 177, 198, .55), inset -2px -2px 4px rgba(255, 255, 255, .85), 0 0 0 1.5px var(--accent);
-  --danger-ring: inset 2px 2px 4px rgba(163, 177, 198, .55), inset -2px -2px 4px rgba(255, 255, 255, .85), 0 0 0 1.5px var(--danger);
-  --accent-glow: 0 0 10px rgba(58, 110, 165, .35);
-  --accent: #3a6ea5;
-  --accent-ink: #3a6ea5;
-  --accent-soft: #d7e3ef;
-  --accent-line: rgba(58, 110, 165, .45);
-  --accent-wash: rgba(58, 110, 165, .14);
-  --success: #35735b;
-  --success-soft: #d9e7dd;
-  --danger: #b8504c;
-  --danger-soft: #eed8d5;
-  --warning-soft: #efe3cd;
-  --warning-border: #dcc49c;
-  --warning-ink: #7a5216;
-  --relation-line: #9fadc0;
-  --scrollbar-thumb: rgba(163, 177, 198, .65);
-  --scrollbar-thumb-hover: rgba(147, 161, 184, .85);
-  --radius-s: 10px;
-  --radius-m: 14px;
-  --radius-l: 20px;
-}
-/* ---- legacy aliases -------------------------------------------------------
-Older component CSS still reads these names;
-they point at the semantic
-tokens so both themes keep rendering correctly. */
-:root,
-[data-theme]{
+  --radius-s: 8px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+  /* legacy aliases: older component CSS reads these names */
   --canvas: var(--surface-panel);
   --surface: var(--surface-app);
   --subtle: var(--surface-sunken);
-  --panel: var(--surface-panel);
+  --panel: var(--surface-app);
   --ink: var(--text);
   --ink-strong: var(--text-strong);
   --muted: var(--text-muted);
@@ -146,9 +80,7 @@ tokens so both themes keep rendering correctly. */
   --shadow-card: var(--elev-1);
   --shadow-raised: var(--elev-2);
   --shadow-popover: var(--elev-3);
-}
-/* ---- motion + metrics ------------------------------------------------------ */
-:root{
+  /* motion + metrics */
   color-scheme: light;
   /* Sidebar open/close: opening eases out over 260 ms, closing reverses faster. */
   --sidebar-open-duration: 260ms;
@@ -162,6 +94,8 @@ tokens so both themes keep rendering correctly. */
   --motion-fast: 120ms;
   --motion-base: 200ms;
   --motion-slow: 320ms;
+  /* Keep in sync with SIDEBAR_WIDTH in ui/breakpoints.ts. */
+  --sidebar-width: 248px;
   --history-width: 300px;
   --space-1: 4px;
   --space-2: 8px;
@@ -223,33 +157,33 @@ input:focus-visible, textarea:focus-visible{
 }
 /* Lightweight interaction transitions (structure/position moves are handled
 by inner layers so entrance animations never override a layout transform).
-Raised -> inset state changes ride the motion curves. */
+Control state changes ride the motion curves. */
 button, .qib-toast, .toast-close{
   transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-base) var(--motion-ease-out), border-color var(--motion-fast) ease;
 }
 button:active:not(:disabled){
   transform: scale(.96);
 }
-/* Soft-UI control presets: a raised control lifts slightly on hover and
-presses inset on :active;
-toggled controls rest inset. */
-.neu-raised, .small-button,
+/* Flat control preset: quiet fill, background shift on hover and press.
+Borders and shadows stay reserved for real surfaces. */
+.small-button,
 .zoom-controls button, .loading-actions button, .dialog-actions button,
 .pattern-options button, .category-chip, .category-grid button{
-  background: var(--surface-raised);
-  box-shadow: var(--elev-1);
+  background: var(--surface-sunken);
 }
-.neu-raised:hover:not(:disabled), .small-button:hover:not(:disabled),
-.zoom-controls button:hover:not(:disabled), .loading-actions button:hover:not(:disabled),
-.dialog-actions button:hover:not(:disabled), .pattern-options button:hover:not(:disabled){
+.small-button:hover:not(:disabled),
+.zoom-controls button:hover:not(:disabled),
+.loading-actions button:hover:not(:disabled),
+.dialog-actions button:hover:not(:disabled),
+.pattern-options button:hover:not(:disabled){
   background: var(--surface-hover);
-  box-shadow: var(--elev-hover);
 }
-.neu-raised:active:not(:disabled), .small-button:active:not(:disabled),
-.zoom-controls button:active:not(:disabled), .loading-actions button:active:not(:disabled),
-.dialog-actions button:active:not(:disabled), .pattern-options button:active:not(:disabled){
-  background: var(--surface-press-fill);
-  box-shadow: var(--elev-inset-sm);
+.small-button:active:not(:disabled),
+.zoom-controls button:active:not(:disabled),
+.loading-actions button:active:not(:disabled),
+.dialog-actions button:active:not(:disabled),
+.pattern-options button:active:not(:disabled){
+  background: var(--surface-pressed);
 }
 /* ---- motion presets ---------------------------------------------------------
 Pair with `usePresence` (ui/motion.ts): keep the element mounted through
@@ -319,11 +253,11 @@ exits ease in, run shorter, and never take pointer input. */
 }
 .loading-actions button.primary-button{
   background: var(--ink-strong);
-  box-shadow: var(--elev-1);
   color: var(--surface-panel);
 }
 /* ---- expanded app shell -------------------------------------------------- */
-.app-shell{
+.app-shell,
+.app-shell.normal{
   position: absolute;
   inset: 0;
   min-height: 0;
@@ -333,6 +267,15 @@ exits ease in, run shorter, and never take pointer input. */
   border-radius: var(--radius-panel);
   overflow: hidden;
   background: var(--panel);
+  /* Paint containment also makes the shell the containing block for fixed
+  descendants, so in-shell layers are clipped by the same rounded edge. It is
+  not a transform: drag regions and menu coordinates stay in screen space. */
+  contain: paint;
+  clip-path: inset(0 round var(--radius-panel));
+}
+.app-shell.is-maximized{
+  border-radius: 0;
+  clip-path: inset(0);
 }
 .topbar{
   display: flex;
@@ -344,12 +287,22 @@ exits ease in, run shorter, and never take pointer input. */
   position: relative;
   z-index: 2;
 }
+.workspace-toolbar-host{
+  flex: 0 0 auto;
+  min-width: 0;
+  position: relative;
+  z-index: 2;
+  background: var(--surface-panel);
+  box-shadow: var(--elev-header-soft);
+}
+.workspace-toolbar-host:empty{ display: none; }
 .window-drag-region{
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   -webkit-app-region: drag;
 }
 .brand-mark{
@@ -382,9 +335,16 @@ exits ease in, run shorter, and never take pointer input. */
 .topbar-actions{
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 2px;
   margin-left: auto;
   -webkit-app-region: no-drag;
+}
+.topbar-actions > *{
+  flex: 0 0 auto;
+}
+.topbar > .sidebar-toggle{
+  flex: 0 0 auto;
 }
 .topbar-actions .topbar-tab{
   padding: 5px 10px;
@@ -475,6 +435,9 @@ exits ease in, run shorter, and never take pointer input. */
   font-size: 12px;
 }
 .crumb-origin{
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 240px;
@@ -488,6 +451,8 @@ exits ease in, run shorter, and never take pointer input. */
   text-align: left;
   -webkit-app-region: no-drag;
 }
+.crumb-origin svg{ flex: 0 0 auto; }
+.crumb-origin > span{ overflow: hidden; text-overflow: ellipsis; }
 .crumb-origin:hover{
   background: var(--surface-hover);
   box-shadow: var(--elev-hover-sm);
@@ -505,6 +470,95 @@ exits ease in, run shorter, and never take pointer input. */
   white-space: nowrap;
   color: var(--ink);
   font-weight: 600;
+}
+/* Canvas hierarchy tabs in the title bar. The strip scrolls inside its own
+slot so a deep chain never squeezes the window buttons; the trailing + stays
+visible at the right edge of the scrollport. */
+.canvas-trail{
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(560px, 46vw);
+  /* Keeps scrollIntoView(nearest) clear of the sticky + button. */
+  scroll-padding-inline-end: 36px;
+  padding: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
+}
+.canvas-trail::-webkit-scrollbar{
+  display: none;
+}
+.canvas-trail-item{
+  flex: 0 0 auto;
+  max-width: 160px;
+  height: 24px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 24px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+.canvas-trail-item:hover:not(:disabled){
+  background-color: var(--surface-hover);
+  color: var(--text);
+}
+.canvas-trail-item.is-current,
+.canvas-trail-item[aria-current="page"]{
+  background-color: var(--surface-panel);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.canvas-trail-item.is-current:hover,
+.canvas-trail-item[aria-current="page"]:hover{
+  background-color: var(--surface-panel);
+  color: var(--text-strong);
+}
+.canvas-trail-item:disabled{
+  opacity: 1;
+  cursor: default;
+}
+.canvas-trail-sep{
+  flex: 0 0 auto;
+  padding: 0 1px;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+.canvas-trail-add{
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  border-radius: 7px;
+  background: var(--surface-sunken);
+  color: var(--faint);
+  -webkit-app-region: no-drag;
+}
+.canvas-trail-add:hover{
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.canvas-trail-item:focus-visible,
+.canvas-trail-add:focus-visible{
+  outline-offset: -2px;
 }
 .canvas-controls{
   box-shadow: var(--elev-header-soft);
@@ -557,6 +611,7 @@ exits ease in, run shorter, and never take pointer input. */
   font-size: 11px;
 }
 .locate-button:hover{
+  background: var(--accent-soft);
   color: var(--accent-ink);
 }
 .zoom-controls .grid-toggle{
@@ -656,16 +711,16 @@ exits ease in, run shorter, and never take pointer input. */
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  background-color: var(--canvas-bg, var(--surface-canvas));
+  background-color: var(--canvas-bg, #ffffff);
   background-position: 0 0;
   background-size: 24px 24px;
 }
 /* Dot spacing equals the grid so snapped node corners sit on the dots. */
 .canvas-viewport.pattern-dots{
-  background-image: radial-gradient(circle, var(--canvas-pattern, var(--relation-line)) 1.1px, transparent 1.25px);
+  background-image: radial-gradient(circle, var(--canvas-pattern, rgba(32, 36, 33, .1)) .7px, transparent .75px);
 }
 .canvas-viewport.pattern-lines{
-  background-image: linear-gradient(to right, var(--canvas-pattern, var(--relation-line)) 1px, transparent 1px), linear-gradient(to bottom, var(--canvas-pattern, var(--relation-line)) 1px, transparent 1px);
+  background-image: linear-gradient(to right, var(--canvas-pattern, rgba(32, 36, 33, .1)) 1px, transparent 1px), linear-gradient(to bottom, var(--canvas-pattern, rgba(32, 36, 33, .1)) 1px, transparent 1px);
 }
 .canvas-viewport.pattern-none{
   background-image: none;
@@ -871,7 +926,7 @@ exits ease in, run shorter, and never take pointer input. */
   z-index: 20;
   scale: 1.03;
   will-change: translate, scale;
-  box-shadow: var(--elev-3);
+  box-shadow: 0 0 0 1px var(--line), var(--elev-3);
 }
 /* Snap jumps are eased instead of teleporting;
 free drags stay 1:1. */
@@ -1092,7 +1147,7 @@ only visible on hover/selection. */
   cursor: grabbing;
   scale: 1.02;
   will-change: translate, scale;
-  box-shadow: var(--elev-3);
+  box-shadow: 0 0 0 1px var(--line), var(--elev-3);
   z-index: 30;
 }
 .canvas-node-card.selected{
@@ -1148,7 +1203,7 @@ only visible on hover/selection. */
   z-index: 8;
   width: 164px;
   height: 104px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-m);
   background: var(--surface-panel);
   box-shadow: var(--elev-2);
   cursor: crosshair;
@@ -1163,7 +1218,7 @@ only visible on hover/selection. */
   height: 100%;
 }
 .mini-map-bg{
-  fill: var(--surface-panel);
+  fill: var(--surface-sunken);
   stroke: var(--line);
 }
 .mini-map-image{
@@ -1180,70 +1235,119 @@ only visible on hover/selection. */
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
-/* ---- breadcrumb ---------------------------------------------------------------- */
-.canvas-breadcrumb{
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  box-shadow: var(--elev-header-soft);
-  font-size: 11px;
-  color: var(--muted);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-.canvas-breadcrumb button{
-  padding: 2px 6px;
-  border-radius: 8px;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.canvas-breadcrumb button:hover{
-  background: var(--surface-hover);
-  box-shadow: var(--elev-hover-sm);
-  color: var(--ink);
-}
-.canvas-breadcrumb button.crumb-current{
-  color: var(--ink);
-  font-weight: 600;
-}
-.canvas-breadcrumb span{
-  color: var(--faint);
-}
-/* ---- workspace sidebar & canvas tree ----------------------------------------- */
+/* ---- workspace sidebar & canvas tree -----------------------------------------
+A single aside is the width placeholder and its single .sidebar-content panel
+moves between docked, hover-peek and closed states. Keeping one tree in one
+node means pinning never clones or remounts the search/tree state. */
 .sidebar{
   position: relative;
+  /* Above full-page content (43), below menus and dialogs. */
+  z-index: 44;
   flex: 0 0 auto;
-  width: 248px;
-  display: flex;
-  flex-direction: column;
+  align-self: stretch;
+  width: var(--sidebar-width);
+  min-width: 0;
   min-height: 0;
-  background: var(--surface);
-  box-shadow: var(--elev-dock);
-  overflow: hidden;
-  transition: width var(--sidebar-open-duration) var(--motion-ease-out), box-shadow var(--sidebar-open-duration) var(--motion-ease-out);
-}
-.sidebar.closed{
-  width: 0;
-  box-shadow: none;
-  transition: width var(--sidebar-close-duration) var(--motion-ease-in-out), box-shadow var(--sidebar-close-duration) var(--motion-ease-in-out);
+  /* The panel inside paints the sidebar skin. This node is only the layout
+  placeholder, so a peek card can overflow it while the dock width animates
+  without being clipped on the first frame. */
+  overflow: visible;
+  transition: width var(--sidebar-open-duration) var(--motion-ease-out);
 }
 .sidebar-content{
-  flex: 1 1 auto;
-  width: 248px;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
   display: flex;
   flex-direction: column;
   min-height: 0;
-  transition: opacity var(--sidebar-open-duration) var(--motion-ease-out), transform var(--sidebar-open-duration) var(--motion-ease-out), visibility 0s linear 0s;
+  overflow: hidden;
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: inset -1px 0 0 var(--line);
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    left var(--sidebar-open-duration) var(--motion-ease-out),
+    top var(--sidebar-open-duration) var(--motion-ease-out),
+    bottom var(--sidebar-open-duration) var(--motion-ease-out),
+    border-radius var(--sidebar-open-duration) var(--motion-ease-out),
+    box-shadow var(--sidebar-open-duration) var(--motion-ease-out),
+    opacity var(--sidebar-open-duration) var(--motion-ease-out),
+    transform var(--sidebar-open-duration) var(--motion-ease-out),
+    visibility 0s linear 0s;
+}
+/* Docked: flush, full-height, and it owns a 248 px layout placeholder. */
+.sidebar.is-pinned{
+  width: var(--sidebar-width);
+}
+.sidebar.is-pinned .sidebar-content{
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 0;
+  box-shadow: inset -1px 0 0 var(--line);
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+}
+/* Closed: no layout width. Content fades away, then leaves hit testing and the
+accessibility tree. */
+.sidebar.closed{
+  width: 0;
+  transition: width var(--sidebar-close-duration) var(--motion-ease-in-out);
 }
 .sidebar.closed .sidebar-content{
+  left: var(--space-2);
+  top: var(--space-2);
+  bottom: var(--space-2);
+  border-radius: var(--radius-panel);
+  box-shadow: none;
   opacity: 0;
   transform: translateX(-12px);
   visibility: hidden;
   pointer-events: none;
-  transition: opacity var(--sidebar-close-duration) var(--motion-ease-in-out), transform var(--sidebar-close-duration) var(--motion-ease-in-out), visibility 0s linear var(--sidebar-close-duration);
+  transition:
+    left var(--sidebar-close-duration) var(--motion-ease-in-out),
+    top var(--sidebar-close-duration) var(--motion-ease-in-out),
+    bottom var(--sidebar-close-duration) var(--motion-ease-in-out),
+    border-radius var(--sidebar-close-duration) var(--motion-ease-in-out),
+    box-shadow var(--sidebar-close-duration) var(--motion-ease-in-out),
+    opacity var(--sidebar-close-duration) var(--motion-ease-in-out),
+    transform var(--sidebar-close-duration) var(--motion-ease-in-out),
+    visibility 0s linear var(--sidebar-close-duration);
+}
+/* Hover peek: zero placeholder and an inset floating card. No scrim and no
+layout change, so the canvas never moves while the pointer travels. */
+.sidebar.is-peeking{
+  width: 0;
+  transition: width var(--sidebar-close-duration) var(--motion-ease-in-out);
+}
+.sidebar.is-peeking .sidebar-content{
+  left: var(--space-2);
+  top: var(--space-2);
+  bottom: var(--space-2);
+  border-radius: var(--radius-panel);
+  /* Downward-weighted elevation keeps the card shadow out of the title bar. */
+  box-shadow: 0 0 0 1px var(--line), 0 12px 32px -12px rgba(20, 28, 22, .16);
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    left var(--sidebar-open-duration) var(--motion-ease-out),
+    top var(--sidebar-open-duration) var(--motion-ease-out),
+    bottom var(--sidebar-open-duration) var(--motion-ease-out),
+    border-radius var(--sidebar-open-duration) var(--motion-ease-out),
+    box-shadow var(--sidebar-open-duration) var(--motion-ease-out),
+    opacity var(--sidebar-open-duration) var(--motion-ease-out),
+    transform var(--sidebar-open-duration) var(--motion-ease-out),
+    visibility 0s linear 0s;
 }
 .sidebar-search{
   display: flex;
@@ -1253,14 +1357,16 @@ only visible on hover/selection. */
   padding: 0 4px 0 8px;
   height: 30px;
   flex: 0 0 auto;
+  border: var(--edge);
   border-radius: var(--radius-sm);
   background: var(--surface-input);
-  box-shadow: var(--elev-inset-sm);
+  box-shadow: none;
   color: var(--faint);
 }
 .sidebar-search:focus-within{
   background: var(--surface-input-focus);
-  box-shadow: var(--focus-ring-inset);
+  border-color: var(--accent);
+  box-shadow: none;
 }
 .sidebar-search svg{
   flex: 0 0 auto;
@@ -1343,9 +1449,11 @@ only visible on hover/selection. */
   display: block;
 }
 .footer-copy{
+  flex: 1 1 auto;
   min-width: 0;
   line-height: 1.3;
 }
+.sidebar-settings{ flex: 0 0 auto; margin-left: auto; }
 .footer-copy strong{
   display: block;
   overflow: hidden;
@@ -1514,64 +1622,24 @@ only visible on hover/selection. */
   background: var(--surface-sunken);
   color: var(--accent-ink);
 }
-/* Narrow windows: the sidebar rides at width 0;
-its content opens as an
-overlay sheet so it never shows as an empty docked panel. */
-.sidebar.overlay-mode{
-  flex-basis: 0;
-  width: 0;
-  box-shadow: none;
-  overflow: visible;
-}
-.sidebar-backdrop{
-  position: fixed;
-  inset: 0;
-  z-index: 29;
-  background: var(--scrim);
-}
-.sidebar-backdrop.motion-fade[data-motion="enter"]{
-  animation-duration: var(--sidebar-open-duration);
-}
-.sidebar-backdrop.motion-fade[data-motion="exit"]{
-  animation-duration: var(--sidebar-close-duration);
-}
-.sidebar-sheet{
-  position: absolute;
-  left: 100%;
-  top: 0;
-  bottom: 0;
-  width: 248px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--surface);
-  box-shadow: var(--elev-3);
-  z-index: 30;
-}
-.sidebar-sheet[data-motion="enter"]{
-  animation: sidebar-sheet-in var(--sidebar-open-duration) var(--motion-ease-out) both;
-}
-.sidebar-sheet[data-motion="exit"]{
-  animation: sidebar-sheet-out var(--sidebar-close-duration) var(--motion-ease-in) both;
-}
 .tree-children{
   transform-origin: top;
 }
 /* Soft scrollbars for scrollable shell surfaces. */
-.tree-body::-webkit-scrollbar, .sidebar::-webkit-scrollbar, .settings-view::-webkit-scrollbar{
+.tree-body::-webkit-scrollbar, .settings-view::-webkit-scrollbar{
   width: 10px;
 }
-.tree-body::-webkit-scrollbar-thumb, .sidebar::-webkit-scrollbar-thumb, .settings-view::-webkit-scrollbar-thumb{
+.tree-body::-webkit-scrollbar-thumb, .settings-view::-webkit-scrollbar-thumb{
   border: 3px solid transparent;
   border-radius: 6px;
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
-.tree-body::-webkit-scrollbar-thumb:hover, .sidebar::-webkit-scrollbar-thumb:hover, .settings-view::-webkit-scrollbar-thumb:hover{
+.tree-body::-webkit-scrollbar-thumb:hover, .settings-view::-webkit-scrollbar-thumb:hover{
   background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
 }
-.tree-body::-webkit-scrollbar-track, .sidebar::-webkit-scrollbar-track, .settings-view::-webkit-scrollbar-track{
+.tree-body::-webkit-scrollbar-track, .settings-view::-webkit-scrollbar-track{
   background: transparent;
 }
 /* ---- canvas context menu -------------------------------------------------------- */
@@ -1580,7 +1648,7 @@ overlay sheet so it never shows as an empty docked panel. */
   z-index: 60;
   min-width: 128px;
   padding: 5px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-m);
   background: var(--surface-panel);
   border: var(--edge);
   box-shadow: var(--elev-3);
@@ -1598,6 +1666,11 @@ overlay sheet so it never shows as an empty docked panel. */
   background: var(--surface-hover-strong);
   box-shadow: var(--elev-inset-sm);
 }
+.canvas-context-menu button:focus-visible{
+  outline: none;
+  background: var(--surface-hover-strong);
+  box-shadow: var(--elev-inset-sm);
+}
 .canvas-context-menu .danger-link{
   color: var(--danger);
 }
@@ -1612,7 +1685,7 @@ overlay sheet so it never shows as an empty docked panel. */
   max-height: min(360px, calc(100% - 24px));
   overflow-y: auto;
   padding: 10px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-m);
   background: var(--surface-panel);
   border: var(--edge);
   box-shadow: var(--elev-3);
@@ -1699,21 +1772,19 @@ overlay sheet so it never shows as an empty docked panel. */
   font-size: 11px;
 }
 .content-actions .category-grid button:hover:not(:disabled){
-  box-shadow: var(--elev-hover);
+  background: var(--surface-hover-strong);
 }
 .content-actions .category-grid button[aria-pressed="true"]{
   background: var(--surface-pressed);
-  box-shadow: var(--elev-inset-sm);
   color: var(--accent-ink);
 }
 .content-actions .category-grid button.new-category{
+  border: 1px dashed var(--line-strong);
   background: transparent;
-  box-shadow: var(--elev-inset-sm);
   color: var(--accent-ink);
 }
 .content-actions .category-grid button.clear-category{
   background: transparent;
-  box-shadow: none;
   color: var(--danger);
 }
 .content-actions form{
@@ -1724,16 +1795,17 @@ overlay sheet so it never shows as an empty docked panel. */
 .content-actions input{
   width: 100%;
   padding: 7px 8px;
-  border: 0;
+  border: var(--edge);
   border-radius: var(--radius-sm);
   outline: none;
   background: var(--surface-input);
-  box-shadow: var(--elev-inset-sm);
+  box-shadow: none;
   font-size: 12px;
 }
 .content-actions input:focus{
   background: var(--surface-input-focus);
-  box-shadow: var(--focus-ring-inset);
+  border-color: var(--accent);
+  box-shadow: none;
 }
 .action-error{
   margin: 0 0 6px;
@@ -1797,6 +1869,7 @@ overlay sheet so it never shows as an empty docked panel. */
   align-items: flex-start;
   gap: 16px;
   padding: 2px 2px 14px;
+  border-bottom: var(--edge);
   flex-wrap: wrap;
 }
 .settings-heading h1{
@@ -1881,14 +1954,15 @@ overlay sheet so it never shows as an empty docked panel. */
   width: 22px;
   height: 22px;
   padding: 0;
+  border: 2px solid var(--surface-panel);
   border-radius: 50%;
-  box-shadow: var(--elev-1);
+  box-shadow: 0 0 0 1px var(--line);
 }
 .color-swatch:hover{
-  box-shadow: var(--elev-hover);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 .color-swatch.selected{
-  box-shadow: var(--focus-ring), var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 .range-field span{
   display: flex;
@@ -1979,17 +2053,37 @@ overlay sheet so it never shows as an empty docked panel. */
 }
 .primary-button{
   background: var(--ink-strong);
-  box-shadow: var(--elev-1);
   color: var(--surface-panel);
 }
-.primary-button:hover:not(:disabled){
-  background: var(--ink-strong);
-  box-shadow: var(--elev-hover);
+.primary-button:hover:not(:disabled),
+.loading-actions button.primary-button:hover:not(:disabled),
+.dialog-actions .primary-button:hover:not(:disabled),
+.small-button.primary-button:hover:not(:disabled){
+  background: var(--accent);
+  color: var(--surface-panel);
+}
+.primary-button:active:not(:disabled),
+.loading-actions button.primary-button:active:not(:disabled),
+.dialog-actions .primary-button:active:not(:disabled),
+.small-button.primary-button:active:not(:disabled){
+  background: var(--accent-ink);
+  color: var(--surface-panel);
 }
 .danger-button{
   background: var(--danger);
-  box-shadow: var(--elev-1);
   color: var(--surface-panel);
+}
+.danger-button:hover:not(:disabled),
+.dialog-actions .danger-button:hover:not(:disabled),
+.small-button.danger-button:hover:not(:disabled){
+  background: var(--danger);
+  filter: brightness(.94);
+}
+.danger-button:active:not(:disabled),
+.dialog-actions .danger-button:active:not(:disabled),
+.small-button.danger-button:active:not(:disabled){
+  background: var(--danger);
+  filter: brightness(.88);
 }
 /* ---- single toast outlet ------------------------------------------------------ */
 .qib-toast{
@@ -2002,9 +2096,10 @@ overlay sheet so it never shows as an empty docked panel. */
   gap: 7px;
   max-width: calc(100% - 40px);
   padding: 7px 8px 7px 11px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--line);
   font-size: 12px;
-  box-shadow: var(--elev-2);
+  box-shadow: var(--shadow-popover);
   animation: toast-in var(--motion-base) var(--motion-ease-out) both;
 }
 .qib-toast.leaving{
@@ -2034,6 +2129,7 @@ overlay sheet so it never shows as an empty docked panel. */
   background: rgba(0, 0, 0, .08);
 }
 .qib-toast.toast-success{
+  border-color: var(--accent-line);
   background: var(--success-soft);
   color: var(--success);
 }
@@ -2041,10 +2137,12 @@ overlay sheet so it never shows as an empty docked panel. */
   color: var(--success);
 }
 .qib-toast.toast-error{
+  border-color: #e7bfbb;
   background: var(--danger-soft);
   color: var(--danger);
 }
 .qib-toast.toast-warning{
+  border-color: var(--warning-border);
   background: var(--warning-soft);
   color: var(--warning-ink);
 }
@@ -2052,7 +2150,7 @@ overlay sheet so it never shows as an empty docked panel. */
   color: var(--warning-ink);
 }
 .qib-toast.toast-info{
-  background: var(--surface-panel);
+  background: var(--surface-sunken);
   color: var(--muted);
 }
 .qib-toast.toast-info .toast-icon{
@@ -2090,16 +2188,24 @@ overlay sheet so it never shows as an empty docked panel. */
   width: 100%;
   margin-top: 12px;
   padding: 8px 10px;
-  border: 0;
+  border: var(--edge);
   border-radius: var(--radius-sm);
   outline: none;
   background: var(--surface-input);
-  box-shadow: var(--elev-inset-sm);
+  box-shadow: none;
   font-size: 12px;
 }
 .dialog-card input:focus{
   background: var(--surface-input-focus);
-  box-shadow: var(--focus-ring-inset);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+.dialog-card input[aria-invalid="true"]{
+  border-color: var(--danger);
+}
+.dialog-card p.dialog-error{
+  margin: 6px 0 0;
+  color: var(--danger);
 }
 .dialog-actions{
   display: flex;
@@ -2114,12 +2220,10 @@ overlay sheet so it never shows as an empty docked panel. */
 }
 .dialog-actions .primary-button{
   background: var(--ink-strong);
-  box-shadow: var(--elev-1);
   color: var(--surface-panel);
 }
 .dialog-actions .danger-button{
   background: var(--danger);
-  box-shadow: var(--elev-1);
   color: var(--surface-panel);
 }
 /* ---- keyframes ---------------------------------------------------------------------- */
@@ -2266,22 +2370,6 @@ overlay sheet so it never shows as an empty docked panel. */
     transform: translateX(-6px);
   }
 }
-@keyframes sidebar-sheet-in {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: none;
-  }
-}
-@keyframes sidebar-sheet-out {
-  from {
-    transform: none;
-  }
-  to {
-    transform: translateX(-100%);
-  }
-}
 /* ---- responsive shell ---------------------------------------------------------- */
 @media (max-width: 900px){
   .brand-copy > span {
@@ -2306,144 +2394,18 @@ overlay sheet so it never shows as an empty docked panel. */
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion-fast: 1ms;
-    --motion-base: 1ms;
-    --motion-slow: 1ms;
-  }
   *, *::before, *::after {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: .01ms !important;
   }
-}
-
-/* ---- theme switch crossfade --------------------------------------------------
-   applyTheme() adds this class for one short beat so the token swap fades
-   instead of snapping. Component transitions are restored when it is removed. */
-:root.theme-switching,
-:root.theme-switching *,
-:root.theme-switching *::before,
-:root.theme-switching *::after{
-  transition: background-color var(--motion-slow) var(--motion-ease-in-out),
-    color var(--motion-slow) var(--motion-ease-in-out),
-    border-color var(--motion-slow) var(--motion-ease-in-out),
-    box-shadow var(--motion-slow) var(--motion-ease-in-out),
-    fill var(--motion-slow) var(--motion-ease-in-out),
-    stroke var(--motion-slow) var(--motion-ease-in-out) !important;
-}
-
-/* ---- theme picker ------------------------------------------------------------ */
-.theme-options{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.theme-option{
-  position: relative;
-  flex: 1 1 200px;
-  max-width: 288px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  border-radius: var(--radius-m);
-  background: var(--surface-panel);
-  box-shadow: var(--elev-1);
-  cursor: pointer;
-  text-align: left;
-}
-.theme-option:hover{
-  box-shadow: var(--elev-hover);
-}
-.theme-option.is-selected{
-  box-shadow: var(--focus-ring), var(--elev-2);
-}
-.theme-option:has(input:checked){
-  box-shadow: var(--focus-ring), var(--elev-2);
-}
-.theme-option input{
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-.theme-option:focus-within{
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.theme-option-copy strong{
-  display: block;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-.theme-option-copy small{
-  display: block;
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-.theme-preview{
-  display: flex;
-  gap: 5px;
-  height: 68px;
-  padding: 6px;
-  border-radius: var(--radius-s);
-  background: var(--surface-canvas);
-  box-shadow: inset 0 0 0 1px var(--line);
-  overflow: hidden;
-  pointer-events: none;
-}
-.theme-preview-side{
-  flex: 0 0 30%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 5px;
-  border-radius: 4px;
-  background: var(--surface-app);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.theme-preview-bar{
-  height: 4px;
-  border-radius: 2px;
-  background: var(--line-strong);
-}
-.theme-preview-bar.is-active{
-  width: 70%;
-  background: var(--accent);
-}
-.theme-preview-main{
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  justify-content: center;
-}
-.theme-preview-card{
-  height: 32px;
-  border-radius: 4px;
-  background: var(--surface-panel);
-  box-shadow: var(--elev-1);
-}
-.theme-preview-row{
-  height: 4px;
-  width: 62%;
-  border-radius: 2px;
-  background: var(--line-strong);
-}
-
-/* ---- neumorphism-only structural lines ---------------------------------------
-   These edges exist only in the soft-UI look; the flat theme uses hairline
-   dividers through --line instead. */
-:root[data-theme="neumorphism"] .sidebar-footer,
-:root[data-theme="neumorphism"] .tray-foot{
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5);
-}
-:root[data-theme="neumorphism"] .cp-editor-content hr{
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .85);
+  /* Sidebar state changes complete immediately instead of waiting out the
+  close delay that keeps its fading content mounted. */
+  .sidebar, .sidebar-content {
+    transition: none !important;
+  }
+  .sidebar.closed .sidebar-content {
+    visibility: hidden;
+  }
 }

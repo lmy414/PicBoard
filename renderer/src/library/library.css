@@ -6,20 +6,24 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: var(--surface-panel);
+  background: var(--surface-app);
 }
 
 .lib-toolbar {
   flex: 0 0 auto;
-  padding: 14px 20px 8px;
+  padding: 4px 12px;
   background: var(--surface-panel);
 }
 
 .lib-toolbar-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 /* Search */
@@ -27,19 +31,22 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1 1 240px;
-  max-width: 360px;
-  height: 34px;
+  flex: 1 1 200px;
+  min-width: 120px;
+  max-width: 280px;
+  height: 28px;
   padding: 0 7px 0 10px;
+  border: var(--edge);
   border-radius: var(--radius-s);
   background: var(--surface-input);
-  box-shadow: var(--elev-inset-sm);
+  box-shadow: none;
   color: var(--text-faint);
-  transition: box-shadow var(--motion-fast) var(--motion-ease-out);
+  transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
 }
 .lib-search:focus-within {
   background: var(--surface-input-focus);
-  box-shadow: var(--focus-ring-inset);
+  border-color: var(--accent);
+  box-shadow: none;
 }
 .lib-search svg { flex: 0 0 auto; }
 .lib-search input {
@@ -67,9 +74,10 @@
 /* Kind chips */
 .lib-kind-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
   gap: 2px;
-  padding: 3px;
+  padding: 2px;
   border-radius: var(--radius-s);
   background: var(--surface-sunken);
   box-shadow: var(--elev-inset-sm);
@@ -78,8 +86,8 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 10px;
+  height: 24px;
+  padding: 0 8px;
   border-radius: var(--radius-s);
   color: var(--text-muted);
   font-size: 11.5px;
@@ -104,6 +112,7 @@
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .lib-select-wrap {
@@ -119,7 +128,7 @@
 }
 .lib-select {
   appearance: none;
-  height: 30px;
+  height: 26px;
   max-width: 168px;
   padding: 0 26px 0 10px;
   border: 0;
@@ -140,10 +149,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 0;
+  flex: 0 0 auto;
   min-height: 18px;
   color: var(--text-faint);
   font-size: 11px;
+  white-space: nowrap;
 }
 .lib-selection {
   display: inline-flex;
@@ -361,12 +372,19 @@
 .lib-empty-action:active { background: var(--surface-press-fill); box-shadow: var(--elev-inset-sm); }
 
 @media (max-width: 720px) {
-  .lib-toolbar { padding: 12px 14px 8px; }
   .lib-grid {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     padding: 14px 14px 32px;
   }
   .lib-filters { margin-left: 0; }
+}
+
+@media (max-width: 900px) {
+  .lib-kind-chips button span { display: none; }
+  .lib-kind-chips button { padding: 0 6px; }
+  .lib-search { max-width: 170px; }
+  .lib-filters { gap: 4px; }
+  .lib-select { max-width: 100px; }
 }
 
 .lib-grid::-webkit-scrollbar { width: 10px; }

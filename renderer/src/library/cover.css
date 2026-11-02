@@ -7,7 +7,6 @@
   overflow: hidden;
   border-radius: inherit;
   background: var(--surface-sunken);
-  box-shadow: var(--elev-inset-sm);
 }
 
 .content-cover img {

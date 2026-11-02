@@ -103,6 +103,25 @@ test('copyContents resolves the copied count and imageUrl uses the picboard prot
   expect(api.assetUrl('content-1', 'a1', 'full')).toBe('picboard://asset/content-1/a1');
 });
 
+test('image editing and file opening use the typed native command arguments', async () => {
+  const api = createTauriAdapter();
+  const image = { name: '编辑.png', data: new Uint8Array([137, 80, 78, 71]) };
+  await api.readImage('image-1');
+  expect(invoke).toHaveBeenLastCalledWith('read_image', { contentId: 'image-1' });
+  await api.saveImageCopy(image);
+  expect(invoke).toHaveBeenLastCalledWith('save_image_copy', { image });
+  await api.exportImage(image);
+  expect(invoke).toHaveBeenLastCalledWith('export_image', { image });
+  await api.openImageFile();
+  expect(invoke).toHaveBeenLastCalledWith('open_image_file', undefined);
+  await api.takePendingImage();
+  expect(invoke).toHaveBeenLastCalledWith('take_pending_image', undefined);
+  await api.getImageAssociation();
+  expect(invoke).toHaveBeenLastCalledWith('get_image_association', undefined);
+  await api.configureImageAssociation();
+  expect(invoke).toHaveBeenLastCalledWith('configure_image_association', undefined);
+});
+
 test('host failures become Error instances with the host message', async () => {
   vi.mocked(invoke).mockRejectedValue('画布不存在');
   const api = createTauriAdapter();
