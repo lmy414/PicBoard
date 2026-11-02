@@ -7,6 +7,10 @@ export default defineConfig({
   plugins: [react()],
   base: "./",
   test: {
+    setupFiles: ["./tests/setup.ts"],
+    // Bound jsdom memory/CPU use while other desktop and build processes run.
+    maxWorkers: 4,
+    minWorkers: 1,
     include: ["tests/**/*.test.{ts,tsx}"],
     // Git worktrees under .worktrees carry their own stale node_modules and
     // test copies; vitest's path-filter matching would otherwise run them.

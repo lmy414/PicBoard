@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import type { AppState, ContentBody, ContentKind, ContentRecord } from "../shared/image-board";
@@ -8,46 +8,6 @@ import { ContentPage } from "../renderer/src/pages/ContentPage";
 Element.prototype.scrollIntoView = function () {};
 
 const NOW = "2026-05-15T04:00:00.000Z";
-
-type RangeGeometry = {
-  getClientRects?: () => DOMRectList;
-  getBoundingClientRect?: () => DOMRect;
-};
-
-/**
- * jsdom has no Range geometry. ProseMirror computes caret coordinates while
- * scrolling a selection after an edit, so restore the missing CSSOM methods
- * for the duration of a test and put the prototype back afterwards.
- */
-function installRangeGeometry(): () => void {
-  const proto = Range.prototype as unknown as RangeGeometry;
-  const clientRects = proto.getClientRects;
-  const boundingRect = proto.getBoundingClientRect;
-  const zero = {
-    x: 0,
-    y: 0,
-    width: 0,
-    height: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-  } as unknown as DOMRect;
-  proto.getClientRects = () => [] as unknown as DOMRectList;
-  proto.getBoundingClientRect = () => zero;
-  return () => {
-    if (clientRects) proto.getClientRects = clientRects;
-    else delete proto.getClientRects;
-    if (boundingRect) proto.getBoundingClientRect = boundingRect;
-    else delete proto.getBoundingClientRect;
-  };
-}
-
-let restoreRangeGeometry: (() => void) | null = null;
-
-beforeEach(() => {
-  restoreRangeGeometry = installRangeGeometry();
-});
 
 function makeContent(kind: ContentKind): ContentRecord {
   return {
@@ -170,8 +130,6 @@ async function waitForBodyFocus(editor: HTMLElement): Promise<void> {
 
 afterEach(() => {
   cleanup();
-  restoreRangeGeometry?.();
-  restoreRangeGeometry = null;
 });
 
 test("typing plain text into empty rich content saves HTML", async () => {
