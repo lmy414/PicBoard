@@ -1,6 +1,6 @@
 [package]
 name = "picboard"
-version = "0.2.0"
+version = "0.3.0"
 description = "Windows 悬浮图片收集与本地画板"
 authors = ["lmy414"]
 license = "MIT"

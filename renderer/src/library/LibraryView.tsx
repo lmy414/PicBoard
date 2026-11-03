@@ -1,8 +1,9 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import type { AppState, ContentKind, ContentRecord } from "../../../shared/image-board";
-import { KIND_LABEL, KIND_ORDER, buildPlacementIndex, contentTitle, matchesQuery, relativeTime } from "../content/content-meta";
+import type { AppState, ContentRecord } from "../../../shared/image-board";
+import { KIND_LABEL, KIND_ORDER, buildPlacementIndex, contentTitle, displayContentKind, matchesContentKind, matchesQuery, relativeTime } from "../content/content-meta";
+import type { DisplayContentKind } from "../content/content-meta";
 import { IconClipboard, KindIcon } from "../ui/ContentIcons";
 import { IconChevronDown, IconClose, IconSearch } from "../ui/Icons";
 import { usePresence } from "../ui/motion";
@@ -19,7 +20,7 @@ export interface LibraryViewProps {
   onQuickActions(event: ReactMouseEvent<HTMLElement> | null, contentId: string): void;
 }
 
-type KindFilter = "all" | ContentKind;
+type KindFilter = "all" | DisplayContentKind;
 type TimeFilter = "all" | "today" | "week" | "month";
 
 interface CardActions {
@@ -181,8 +182,8 @@ export function LibraryView(props: LibraryViewProps) {
 
   const allContents = useMemo(() => Object.values(state.contents), [state.contents]);
   const kindCounts = useMemo(() => {
-    const counts: Record<ContentKind, number> = { text: 0, richText: 0, link: 0, image: 0 };
-    for (const content of allContents) counts[content.kind] += 1;
+    const counts: Record<DisplayContentKind, number> = { richText: 0, link: 0, image: 0 };
+    for (const content of allContents) counts[displayContentKind(content.kind)] += 1;
     return counts;
   }, [allContents]);
 
@@ -204,7 +205,7 @@ export function LibraryView(props: LibraryViewProps) {
     };
     return allContents
       .filter((content) => {
-        if (kind !== "all" && content.kind !== kind) return false;
+        if (!matchesContentKind(content, kind)) return false;
         if (category === "none" && content.categoryId !== null) return false;
         if (category !== "all" && category !== "none" && content.categoryId !== category) return false;
         if (time !== "all") {

@@ -4,6 +4,9 @@ export type ContentKind = "text" | "richText" | "link" | "image";
 /** How a content first entered PicBoard. */
 export type ContentSource = "clipboard" | "paste" | "drop" | "migrated" | "manual";
 
+/** Native edge/corner resize directions, matching Tauri's ResizeDirection. */
+export type WindowResizeDirection = "North" | "NorthEast" | "East" | "SouthEast" | "South" | "SouthWest" | "West" | "NorthWest";
+
 export interface ImageInfo {
   fileName: string;
   /** Data-root-relative path; host-internal. The renderer loads pixels via `imageUrl()`. */
@@ -312,7 +315,10 @@ export interface ImageBoardApi {
   /** Open an absolute http(s) URL in the system browser. */
   openExternalUrl(url: string): Promise<void>;
   listPlugins(): Promise<PluginListing>;
+  /** Hand a titlebar gesture to the OS (including drag-to-restore and Aero snap). */
   startTitlebarDrag(): Promise<void>;
+  /** Main window only; the native sizing loop enforces the 720×480 minimum. */
+  startResizeDragging(direction: WindowResizeDirection): Promise<void>;
   toggleMaximized(): Promise<boolean>;
   isMaximized(): Promise<boolean>;
   closeWindow(): Promise<void>;

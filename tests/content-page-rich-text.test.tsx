@@ -132,6 +132,59 @@ afterEach(() => {
   cleanup();
 });
 
+test("opening and closing legacy plain text leaves its stored body untouched", async () => {
+  const { updates, unmount } = mountPage("text", { text: "旧文本\n<保留原文>", html: null });
+  const editor = await waitForEditor();
+  await waitForBodyFocus(editor);
+  expect(editor.querySelectorAll("p")).toHaveLength(2);
+  expect(editor.textContent).toBe("旧文本<保留原文>");
+  expect(updates).toHaveLength(0);
+
+  unmount();
+  await act(async () => {});
+  expect(window.imageBoard.updateTextContent).not.toHaveBeenCalled();
+});
+
+test("editing legacy plain paragraphs saves HTML and promotes the stored kind", async () => {
+  const { updates, callbacks } = mountPage("text", { text: "旧文本", html: null });
+  const editor = await waitForEditor();
+  await waitForBodyFocus(editor);
+
+  pasteText(editor, "继续写");
+  await waitFor(() => expect(updates.at(-1)).toEqual({ text: "旧文本继续写", html: "<p>旧文本继续写</p>" }), { timeout: 3000 });
+  await waitFor(() => expect(document.querySelector(".cp-page-richText")).not.toBeNull());
+  expect(callbacks.onError).not.toHaveBeenCalled();
+});
+
+test("legacy text preserves line breaks when its first edit saves as rich text", async () => {
+  const { updates } = mountPage("text", { text: "第一行\n第二行", html: null });
+  const editor = await waitForEditor();
+  await waitForBodyFocus(editor);
+
+  fireEvent.keyDown(editor, { key: "Enter", shiftKey: true });
+  pasteText(editor, "末尾");
+  await waitFor(() => expect(updates.at(-1)).toEqual({
+    text: "第一行\n第二行\n末尾",
+    html: "<p>第一行</p><p>第二行<br>末尾</p>",
+  }), { timeout: 3000 });
+});
+
+test("a failed legacy text save retries as rich text without prematurely changing its kind", async () => {
+  const { updates, callbacks } = mountPage("text", { text: "旧", html: null });
+  vi.mocked(window.imageBoard.updateTextContent).mockRejectedValueOnce(new Error("保存失败"));
+  const editor = await waitForEditor();
+  await waitForBodyFocus(editor);
+
+  pasteText(editor, "稿");
+  await waitFor(() => expect(callbacks.onError).toHaveBeenCalled(), { timeout: 3000 });
+  expect(document.querySelector(".cp-page-text")).not.toBeNull();
+  expect(updates).toHaveLength(0);
+
+  pasteText(editor, "完成");
+  await waitFor(() => expect(updates.at(-1)).toEqual({ text: "旧稿完成", html: "<p>旧稿完成</p>" }), { timeout: 3000 });
+  await waitFor(() => expect(document.querySelector(".cp-page-richText")).not.toBeNull());
+});
+
 test("typing plain text into empty rich content saves HTML", async () => {
   const { updates, callbacks } = mountPage("richText", { text: "", html: "<p></p>" });
   const editor = await waitForEditor();
@@ -172,10 +225,10 @@ test("the first load puts the caret at the end and later data updates keep it th
   pasteText(editor, "f");
   await waitFor(() => expect(editor.textContent).toBe("abcdef"));
   await waitFor(
-    () => expect(updates.at(-1)).toEqual({ text: "abcdef", html: null }),
+    () => expect(updates.at(-1)).toEqual({ text: "abcdef", html: "<p>abcdef</p>" }),
     { timeout: 3000 },
   );
-  expect(updates.at(-1)).toEqual({ text: "abcdef", html: null });
+  expect(updates.at(-1)).toEqual({ text: "abcdef", html: "<p>abcdef</p>" });
 });
 
 test("formatting plain text saves real strong markup and stays rich after it is removed", async () => {
@@ -239,8 +292,8 @@ test("removing formatting from rich content still saves HTML", async () => {
   expect(saved.html).not.toContain("<strong>");
 });
 
-test("unmounting a cleared rich page still saves HTML", async () => {
-  const { updates, unmount } = mountPage("richText", { text: "旧", html: "<p><strong>旧</strong></p>" });
+test.each(["text", "richText"] as const)("unmounting a cleared %s page still saves HTML", async (kind) => {
+  const { updates, unmount } = mountPage(kind, { text: "旧", html: kind === "text" ? null : "<p><strong>旧</strong></p>" });
   const editor = await waitForEditor();
   await waitForBodyFocus(editor);
 

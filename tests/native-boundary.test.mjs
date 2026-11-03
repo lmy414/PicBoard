@@ -143,29 +143,27 @@ test("auto-start launches silently into the tray", async () => {
   assert.match(setupReveal, /if !start_in_tray \{[\s\S]*?mark_placement_done\("main"\)/);
 });
 
-test("maximize preserves restore bounds and applies them with no lock held", async () => {
+test("window gestures use one native maximize state and callbacks remain non-blocking", async () => {
   const controller = await source("src-tauri/src/window_controller.rs");
   const toggle = branchBetween(controller, "pub fn toggle_maximized", "pub fn start_titlebar_drag");
-  // The pre-maximize bounds are recorded before the window APIs run, and the
-  // restore rect is copied out before set_position/set_size; a re-entrant
-  // Resized/Moved event therefore never needs the restore mutex.
-  assert.ok(toggle.includes("begin_maximize(current)"));
-  assert.ok(toggle.includes("take_restore()"));
-  assert.ok(toggle.includes("set_logical_bounds(&win, work)"));
-  assert.ok(toggle.includes("set_logical_bounds(&win, bounds)"));
-  assert.doesNotMatch(toggle, /\.lock\(/);
+  // Windows owns the restore placement for both app buttons and OS shortcuts.
+  assert.match(toggle, /win\.is_maximized\(\)/);
+  assert.match(toggle, /win\.maximize\(\)/);
+  assert.match(toggle, /win\.unmaximize\(\)/);
+  assert.doesNotMatch(toggle, /set_logical_bounds|\.lock\(/);
 
-  const drag = branchBetween(controller, "pub fn start_titlebar_drag", "pub fn request_teardown");
-  assert.doesNotMatch(drag, /\.lock\(/);
+  const drag = branchBetween(controller, "pub fn start_titlebar_drag", "pub fn start_resize_dragging");
+  assert.match(drag, /win\.start_dragging\(\)/);
+  assert.doesNotMatch(drag, /set_logical_bounds|\.lock\(/);
+  const sizing = branchBetween(controller, "pub fn start_resize_dragging", "pub fn request_teardown");
+  assert.match(sizing, /start_resize_dragging\(direction\)/);
+  assert.match(sizing, /win\.is_maximized\(\)/);
+  assert.match(sizing, /win\.is_minimized\(\)/);
+  assert.doesNotMatch(sizing, /tray_panel/);
 
-  // The window-event handler path is lock-free.
-  const handler = branchBetween(
-    controller,
-    "pub fn note_window_geometry_changed",
-    "pub fn is_maximized",
-  );
-  assert.match(handler, /should_schedule_save\(\)/);
-  assert.doesNotMatch(handler, /\.lock\(/);
+  const handler = branchBetween(controller, "pub fn note_window_geometry_changed", "pub fn is_maximized");
+  assert.match(handler, /bounds_saver\.request\(\)/);
+  assert.doesNotMatch(handler, /\.lock\(|win\.|is_maximized\(\)/);
 });
 
 test("window APIs are deferred out of window and tray callbacks", async () => {
@@ -187,4 +185,20 @@ test("window APIs are deferred out of window and tray callbacks", async () => {
   assert.match(close, /prevent_close\(\)/);
   assert.match(close, /spawn_worker\("picboard-close-action"/);
   assert.doesNotMatch(close, /\.hide\(\)|\.exit\(/);
+});
+
+
+test("launch images wait until both windows and close behavior exist", async () => {
+  const lib = await source("src-tauri/src/lib.rs");
+  const setup = branchBetween(lib, "fn setup_app", "pub fn run()");
+  assert.doesNotMatch(setup, /image_files::open_path/);
+  const ready = setup.indexOf("mark_setup_ready()");
+  assert.ok(ready > setup.indexOf('WebviewWindowBuilder::new(app, "main"'));
+  assert.ok(ready > setup.indexOf('WebviewWindowBuilder::new(app, "tray"'));
+  assert.ok(ready > setup.indexOf("install_close_behavior(&window)?"));
+  assert.ok(setup.indexOf("process_pending_images(app.handle())") > ready);
+  const run = lib.slice(lib.indexOf("pub fn run()"));
+  assert.ok(run.indexOf("pending_images.enqueue") < run.indexOf("tauri_plugin_single_instance::init"));
+  const pageLoad = branchBetween(setup, "on_page_load(move |_webview, payload|", ".build()?");
+  assert.match(pageLoad, /PageLoadEvent::Started[\s\S]*renderer_loading\(\)/);
 });

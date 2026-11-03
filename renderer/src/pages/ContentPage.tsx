@@ -42,6 +42,7 @@ export interface ContentPageProps {
   toolbarHost?: HTMLElement | null;
   navigationGuardRef?: React.MutableRefObject<(() => boolean | Promise<boolean>) | null>;
   onOpenContent?(contentId: string): void;
+  onImageSaved?(result: { state: AppState; contentId: string }): void | Promise<void>;
   onState(state: AppState): void;
   onClose(): void;
   onCopy(contentIds: string[]): void;
@@ -120,7 +121,6 @@ export function ContentPage(props: ContentPageProps) {
   const [now, setNow] = useState(() => Date.now());
   const [infoOpen, setInfoOpen] = useState(false);
   const infoButtonRef = useRef<HTMLButtonElement>(null);
-  const [imageToolbarHost, setImageToolbarHost] = useState<HTMLDivElement | null>(null);
   const [editingImage, setEditingImage] = useState(false);
 
   useEffect(() => {
@@ -232,7 +232,6 @@ export function ContentPage(props: ContentPageProps) {
           ) : null}
           <button type="button" ref={infoButtonRef} className={`cp-action cp-info-trigger${infoOpen ? " active" : ""}`} title="内容信息" aria-label="内容信息" aria-expanded={infoOpen} aria-haspopup="dialog" onClick={() => setInfoOpen((open) => !open)}><IconInfo size={14} /><span>信息</span></button>
           <span className="cp-toolbar-grow" />
-          {content.kind === "image" && <div ref={setImageToolbarHost} className="cp-image-tools-host" />}
           {content.kind === "image" && <button type="button" className="cp-action" onClick={() => { setInfoOpen(false); setEditingImage(true); }}>编辑图像</button>}
           {editable ? <SaveStatusChip status={saveStatus} /> : null}
           <button className="cp-action" onClick={() => props.onCopy([content.id])} title="复制到剪贴板" aria-label="复制">
@@ -252,7 +251,7 @@ export function ContentPage(props: ContentPageProps) {
   );
 
   return (
-    <div className={`cp-page cp-page-${content.kind}`}>
+    <div className={`cp-page cp-page-${content.kind}${editingImage ? " is-editing-image" : ""}`}>
       {!editingImage && (props.toolbarHost ? createPortal(toolbar, props.toolbarHost) : props.toolbarHost === undefined ? toolbar : null)}
       <Popover open={infoOpen} anchor={infoButtonRef.current} onClose={() => setInfoOpen(false)} width={320} className="cp-info-panel" panelProps={{ role: "dialog", "aria-label": "内容信息" }}>
         <strong className="cp-info-title">{contentTitle(content)}</strong>
@@ -292,9 +291,9 @@ export function ContentPage(props: ContentPageProps) {
 
       <div className="cp-body">
         {content.kind === "image" && editingImage ? (
-          <ImageEditor content={content} toolbarHost={props.toolbarHost} apiRef={apiRef} onCancel={() => setEditingImage(false)} onSaved={(result) => { props.onState(result.state); setEditingImage(false); props.onNotice("已保存图片副本，原图保留"); props.onOpenContent?.(result.contentId); }} onError={props.onError} onNotice={props.onNotice} />
+          <ImageEditor content={content} toolbarHost={props.toolbarHost} apiRef={apiRef} onCancel={() => setEditingImage(false)} onSaved={async (result) => { if (props.onImageSaved) { await props.onImageSaved(result); setEditingImage(false); } else { props.onState(result.state); setEditingImage(false); props.onNotice("已保存图片副本，原图保留"); props.onOpenContent?.(result.contentId); } }} onError={props.onError} onNotice={props.onNotice} />
         ) : content.kind === "image" ? (
-          <ImageContentPage key={content.id} content={content} onError={props.onError} toolbarHost={imageToolbarHost} />
+          <ImageContentPage key={content.id} content={content} onError={props.onError} compact />
         ) : content.kind === "link" ? (
           <LinkContentPage
             key={content.id}

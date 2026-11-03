@@ -12,12 +12,12 @@ export const TRAY_TABS: TrayTab[] = ["all", "text", "image", "link"];
 
 export const TRAY_TAB_LABEL: Record<TrayTab, string> = {
   all: "全部",
-  text: "文本",
+  text: "富文本",
   image: "图片",
   link: "链接",
 };
 
-/** The 文本 tab covers both plain and rich text. */
+/** The 富文本 tab covers both stored plain and rich text. */
 export function trayTabMatches(content: ContentRecord, tab: TrayTab): boolean {
   if (tab === "all") return true;
   if (tab === "text") return content.kind === "text" || content.kind === "richText";

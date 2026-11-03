@@ -1,0 +1,167 @@
+/* Semantic palettes shared by the main window, tray, editor and content surfaces. */
+:root {
+  --canvas-pattern-default: rgba(32, 36, 33, .1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --surface-app: #111714;
+  --surface-panel: #1a211d;
+  --surface-raised: #242d27;
+  --surface-canvas: #141b17;
+  --canvas-bg: var(--surface-canvas);
+  --canvas-pattern-default: rgba(183, 205, 190, .16);
+  --canvas-pattern: var(--canvas-pattern-default);
+  --surface-sunken: #121a15;
+  --surface-input: #232c26;
+  --surface-input-focus: #2a352e;
+  --surface-hover: #2c3930;
+  --surface-hover-strong: #35443a;
+  --surface-pressed: #304237;
+  --surface-press-fill: #304237;
+  --fade-panel: rgba(26, 33, 29, 0);
+  --scrim: rgba(8, 12, 10, .65);
+
+  /* text */
+  --text: #e4ece6;
+  --text-strong: #f2f6f3;
+  --text-muted: #a6b4a9;
+  --text-faint: #839589;
+
+  /* lines, elevation and rings */
+  --line: #35433a;
+  --line-strong: #516658;
+  --edge: 1px solid var(--line);
+  --elev-1: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, .25);
+  --elev-2: 0 0 0 1px var(--line), 0 2px 8px rgba(0, 0, 0, .3);
+  --elev-3: 0 8px 24px rgba(0, 0, 0, .4);
+  --elev-surface-lg: 0 0 0 1px var(--line), 0 2px 8px rgba(0, 0, 0, .3);
+  --elev-hover-sm: none;
+  --elev-hover: 0 0 0 1px var(--line-strong), 0 2px 8px rgba(0, 0, 0, .3);
+  --elev-inset: 0 0 0 1px var(--line);
+  --elev-inset-sm: none;
+  --elev-header: inset 0 -1px 0 var(--line);
+  --elev-header-soft: inset 0 -1px 0 var(--line);
+  --elev-dock: inset -1px 0 0 var(--line);
+  --elev-dock-right: 0 0 0 1px var(--line), -12px 0 28px rgba(0, 0, 0, .3);
+  --focus-ring: 0 0 0 1.5px var(--accent);
+  --focus-ring-inset: 0 0 0 1.5px var(--accent);
+  --danger-ring: 0 0 0 1.5px var(--danger);
+  --accent-glow: 0 0 0 3px rgba(99, 199, 157, .16);
+
+  /* palette */
+  --accent: #63c79d;
+  --accent-ink: #8be0b7;
+  --accent-soft: #263f33;
+  --accent-line: rgba(99, 199, 157, .4);
+  --accent-wash: rgba(99, 199, 157, .12);
+  --success: #63c79d;
+  --success-soft: #263f33;
+  --danger: #ef9292;
+  --danger-soft: #452a2c;
+  --warning-soft: #3c3320;
+  --warning-border: #70603a;
+  --warning-ink: #e7ce8a;
+  --relation-line: #45574a;
+  --scrollbar-thumb: rgba(202, 222, 208, .24);
+  --scrollbar-thumb-hover: rgba(202, 222, 208, .4);
+
+  /* legacy aliases */
+  --canvas: var(--surface-panel);
+  --surface: var(--surface-app);
+  --subtle: var(--surface-sunken);
+  --panel: var(--surface-app);
+  --ink: var(--text);
+  --ink-strong: var(--text-strong);
+  --muted: var(--text-muted);
+  --faint: var(--text-faint);
+  --border: var(--line);
+  --shadow-card: var(--elev-1);
+  --shadow-raised: var(--elev-2);
+  --shadow-popover: var(--elev-3);
+}
+
+/* Keep root and body transparent so the tray window stays transparent around .tray-card */
+:root,
+body,
+#root,
+:root[data-surface="tray"],
+:root[data-surface="tray"] body,
+:root[data-surface="tray"] #root {
+  background: transparent;
+}
+
+:root[data-theme="dark"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] select {
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] select option {
+  background: var(--surface-panel);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .floating-capsule,
+:root[data-theme="dark"] .is-canvas-workspace .workspace-navigation {
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .38), 0 1px 3px rgba(0, 0, 0, .28);
+}
+
+:root[data-theme="dark"] .sidebar.is-peeking .sidebar-content {
+  box-shadow: 0 0 0 1px var(--line), 0 12px 32px -12px rgba(0, 0, 0, .5);
+}
+
+:root[data-theme="dark"] .ime-surface {
+  background: repeating-conic-gradient(#303b33 0% 25%, #232c26 0% 50%) 0 0 / 16px 16px;
+}
+
+:root[data-theme="dark"] .cp-editor-content code,
+:root[data-theme="dark"] .cp-editor-content pre {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .cp-editor-content th {
+  background: var(--surface-raised);
+}
+
+:root[data-theme="dark"] .cp-editor-content td,
+:root[data-theme="dark"] .cp-editor-content th {
+  border-color: var(--line-strong);
+}
+
+:root[data-theme="dark"] .cp-link-primary,
+:root[data-theme="dark"] .cp-retry,
+:root[data-theme="dark"] .cp-bubble-link-apply,
+:root[data-theme="dark"] .tray-foot-main {
+  color: #10251a;
+}
+
+:root[data-theme="dark"] .cp-image-loading,
+:root[data-theme="dark"] .cp-image-skeleton::after {
+  background-image: linear-gradient(100deg, transparent 30%, rgba(220, 240, 226, .08) 50%, transparent 70%);
+}
+
+:root[data-theme="dark"] .qib-toast.toast-error {
+  border-color: rgba(239, 146, 146, .4);
+}
+
+:root[data-theme="dark"] .toast-close:hover {
+  background: rgba(255, 255, 255, .1);
+}
+
+:root[data-theme="dark"] .qib-color-chip,
+:root[data-theme="dark"] .qib-preview-chip,
+:root[data-theme="dark"] .qib-preset,
+:root[data-theme="dark"] .qib-preset-swatch {
+  border-color: var(--line-strong);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .2);
+}
+/* CanvasStage chooses the default pattern using inkCustomized. Never infer
+   customization from a color string: users may intentionally choose defaults. */

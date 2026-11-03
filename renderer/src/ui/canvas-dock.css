@@ -1,0 +1,65 @@
+/* Floating controls share one surface while leaving the board fully interactive. */
+.floating-capsule{background:var(--surface-panel);border:var(--edge);box-shadow:0 4px 18px rgba(20,28,22,.09),0 1px 3px rgba(20,28,22,.04);border-radius:18px}
+.canvas-float-layer{position:absolute;inset:0;z-index:14;pointer-events:none;container-type:inline-size}
+.canvas-dock-position{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 24px);pointer-events:auto}
+.canvas-dock,.canvas-view-dock{display:flex;align-items:center;gap:3px;padding:7px;color:var(--text-muted)}
+.canvas-dock{max-width:100%;border-radius:20px}
+.canvas-dock button,.canvas-view-dock button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;height:36px;padding:0;border-radius:12px;background:transparent;color:inherit}
+.canvas-dock button:hover:not(:disabled),.canvas-view-dock button:hover:not(:disabled){background:var(--surface-hover);color:var(--text)}
+.canvas-dock button[aria-pressed=true],.canvas-view-dock button.active{background:var(--accent-soft);color:var(--accent-ink)}
+.canvas-dock .dock-add{background:var(--text-strong);color:var(--surface-panel);margin-right:3px}
+.canvas-dock .dock-add:hover:not(:disabled){background:var(--accent);color:#fff}
+.dock-separator{flex:0 0 auto;width:1px;height:22px;margin:0 3px;background:var(--line)}
+.canvas-view-dock{position:absolute;bottom:18px;left:18px;pointer-events:auto;border-radius:18px}
+.canvas-view-dock button{width:30px;height:30px;border-radius:10px}
+.dock-zoom{min-width:44px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums;color:var(--text)}
+.dock-add-menu{padding:6px!important}
+.dock-add-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:9px;text-align:left;color:var(--text-muted)}
+.dock-add-menu button:hover{background:var(--surface-hover);color:var(--text)}
+.dock-shortcuts{padding:16px!important;font-size:12px}
+.dock-shortcuts strong{font-size:13px}.dock-shortcuts dl{margin:12px 0 0}.dock-shortcuts dl>div{display:flex;justify-content:space-between;gap:12px;padding:6px 0}.dock-shortcuts dt{color:var(--text-muted)}.dock-shortcuts dd{margin:0;color:var(--text)}
+@container(max-width:960px){.canvas-view-dock{left:18px;bottom:80px;padding:4px 7px}}
+@container(max-width:420px){.canvas-dock{gap:1px;padding:6px}.canvas-dock button{width:31px;height:34px}.dock-separator{margin:0 2px}}
+/* Keep the full native-style titlebar; only workspace actions float on the board. */
+.topbar-start{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.workspace-navigation{display:flex;align-items:center;gap:2px}
+.is-canvas-workspace>.topbar{z-index:50;flex:0 0 44px;height:44px}
+.is-canvas-workspace .workspace-navigation{position:absolute;top:calc(100% + 12px);right:12px;padding:5px;gap:2px;border:var(--edge);border-radius:16px;background:var(--surface-panel);box-shadow:0 4px 18px rgba(20,28,22,.09)}
+.is-canvas-workspace>.workspace-toolbar-host{position:absolute;top:56px;left:12px;z-index:45;width:max-content;max-width:calc(100% - 240px);border:var(--edge);border-radius:16px;background:var(--surface-panel);box-shadow:var(--elev-2)}
+.is-canvas-workspace>.workspace-toolbar-host:empty{display:none}
+.is-canvas-workspace .workspace-toolbar-host .cp-toolbar{height:38px;border-radius:16px;padding:4px 8px;gap:5px}
+.is-canvas-workspace .hist-drawer{top:66px;bottom:12px;height:auto;max-height:calc(100% - 78px);border-radius:16px 0 0 16px;overflow:hidden}
+.is-canvas-workspace .workspace-main{container-type:inline-size}
+.canvas-dock-motion{position:absolute;inset:0;z-index:14;pointer-events:none}
+.canvas-dock-motion.has-overlay-history{right:var(--history-width)}
+.has-history-overlay>.selection-toolbar{left:calc((100% - var(--history-width))/2);max-width:calc(100% - var(--history-width) - 24px)}
+.has-history-overlay .mini-map{visibility:hidden;pointer-events:none}
+.is-canvas-workspace .selection-toolbar{bottom:142px;z-index:16;max-width:calc(100% - 24px)}
+.is-canvas-workspace .cp-page:not(.is-editing-image)>.cp-body{padding-top:64px}
+.is-canvas-workspace .cp-page-image{background:var(--surface-sunken)}
+.is-canvas-workspace .cp-image-viewport{box-shadow:none}
+.is-canvas-workspace .cp-image-meta{display:none}
+.is-canvas-workspace>.qib-toast{top:112px;bottom:auto}
+.is-canvas-workspace .busy-chip{top:56px;right:240px}
+.is-canvas-workspace .page-crumbs>.crumb-path{display:flex}
+.canvas-viewport.hand-tool .canvas-world *{cursor:grab!important}
+.canvas-viewport.is-panning .canvas-world *{cursor:grabbing!important}
+@container(max-width:659px){
+  .canvas-dock-motion.has-overlay-history{right:0}
+  .has-history-overlay>.selection-toolbar{left:50%;max-width:calc(100% - 24px)}
+  .is-canvas-workspace .history-slot.overlay .hist-drawer{bottom:148px;max-height:calc(100% - 214px)}
+}
+@media(max-width:900px){.is-canvas-workspace .workspace-navigation{right:8px;top:calc(100% + 8px)}.is-canvas-workspace>.workspace-toolbar-host{top:52px;left:8px;max-width:calc(100% - 224px)}}
+/* Native resize sessions own the drag; these handles only initiate it. */
+.window-resize-handles{position:absolute;inset:0;z-index:65;pointer-events:none;border-radius:inherit;box-shadow:inset 0 0 0 1px var(--line-strong)}
+.window-resize-edge{position:absolute;pointer-events:auto;touch-action:none}
+.resize-North{left:12px;right:12px;top:0;height:5px;cursor:n-resize}
+.resize-South{left:12px;right:12px;bottom:0;height:5px;cursor:s-resize}
+.resize-West{left:0;top:12px;bottom:12px;width:5px;cursor:w-resize}
+.resize-East{right:0;top:12px;bottom:12px;width:5px;cursor:e-resize}
+.resize-NorthWest,.resize-NorthEast,.resize-SouthWest,.resize-SouthEast{width:12px;height:12px}
+.resize-NorthWest{top:0;left:0;cursor:nw-resize}.resize-NorthEast{top:0;right:0;cursor:ne-resize}
+.resize-SouthWest{bottom:0;left:0;cursor:sw-resize}.resize-SouthEast{bottom:0;right:0;cursor:se-resize}
+.canvas-view-dock .dock-view-toggle{width:auto;min-width:68px;gap:2px;padding:0 6px}
+.canvas-view-details{display:flex;align-items:center;gap:3px}
+.canvas-view-dock:not(.is-expanded){padding:4px 6px}

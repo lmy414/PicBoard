@@ -167,16 +167,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     let storage: SharedStorage = Arc::new(Mutex::new(store));
     app.manage(storage.clone());
-    let args: Vec<String> = std::env::args().collect();
-    let mut paths = image_files::paths_from_args(&args, &std::env::current_dir()?);
-    paths.extend(std::mem::take(&mut *app.state::<image_files::PendingImage>().paths.lock().unwrap_or_else(|p| p.into_inner())));
-    for path in paths {
-        match image_files::open_path(app.handle(), &path) {
-            Ok(result) => *app.state::<image_files::PendingImage>().content_id.lock().unwrap_or_else(|p| p.into_inner()) = Some(result.content_id),
-            Err(error) => eprintln!("[image-open] {error}"),
-        }
-    }
-
     let window_controller = WindowController::new(app.handle().clone());
     app.manage(window_controller.clone());
     let readiness = StartupReadiness::default();
@@ -236,6 +226,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 tauri::webview::PageLoadEvent::Finished => "Finished",
             };
             eprintln!("[host] page load event: {event} url={}", payload.url());
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                page_app.state::<image_files::PendingImage>().renderer_loading();
+            }
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 // Native page-load finished is the reveal fallback: the
                 // renderer's host:ready cannot fire while the window is hidden
@@ -324,16 +317,28 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // own action; quit lets the window close naturally.
     crate::desktop::install_close_behavior(&window)?;
 
-    // Initial visibility is owned by the one-shot readiness state. An
-    // unconditional delayed show would undo a deliberate tray-hide.
+    // Image ingestion may do file IO/decoding. Only enable its worker after
+    // both webviews, placement/readiness and close behavior are installed.
+    app.state::<image_files::PendingImage>().mark_setup_ready();
+    image_files::process_pending_activation(app.handle());
+    image_files::process_pending_images(app.handle());
 
+    // Initial visibility is owned by the one-shot readiness state. An
+    // empty image queue must never introduce an unconditional show.
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Queue the first launch before installing the single-instance callback:
+    // early second-instance paths append after these and cannot overtake them.
+    let pending_images = image_files::PendingImage::default();
+    let args: Vec<String> = std::env::args().collect();
+    pending_images.enqueue(image_files::paths_from_args(
+        &args, &std::env::current_dir().unwrap_or_default(),
+    ));
     let builder = tauri::Builder::default()
-        .manage(image_files::PendingImage::default())
+        .manage(pending_images)
         // Image bytes are served by this scheme (`convertFileSrc` on the
         // renderer side builds `http://picboard.localhost/thumb%2F<id>`).
         // Requests are queued to a fixed worker pool, so decoding and thumbnail
@@ -393,6 +398,7 @@ pub fn run() {
             commands::quit_app,
             commands::toggle_maximized,
             commands::start_titlebar_drag,
+            commands::start_resize_dragging,
             commands::is_maximized,
             commands::close_window,
             commands::get_desktop_settings,

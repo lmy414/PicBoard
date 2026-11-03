@@ -1,0 +1,45 @@
+.settings-navigation { display: flex; flex: 1 1 0%; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; gap: 8px; padding: 4px 0 12px; }
+.settings-navigation-label { flex: 0 0 auto; padding: 4px 10px; color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.settings-navigation-list { display: flex; flex: 1 1 0%; flex-direction: column; gap: 4px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; padding: 3px; }
+.settings-navigation-item { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 9px 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text-muted); text-align: left; font-size: 12px; line-height: 18px; }
+.settings-navigation-item:hover { background: var(--surface-hover); color: var(--text); }
+.settings-navigation-item[aria-current="page"] { background: var(--accent-soft); border-color: var(--line); color: var(--accent-ink); font-weight: 600; }
+.settings-navigation-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-navigation-marker { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .3; }
+.settings-navigation-item[aria-current="page"] .settings-navigation-marker { opacity: 1; }
+.settings-navigation-item > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.settings-navigation-empty { margin: 0; padding: 12px 10px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.settings-page { min-width: 0; }
+.settings-page-heading { align-items: flex-start; }
+.settings-page-kicker { display: block; margin-bottom: 6px; color: var(--text-muted); font-size: 11px; }
+.settings-page .settings-heading .settings-page-guidance { margin-top: 8px; color: var(--text-muted); font-size: 11px; }
+.settings-page > .settings-section { max-width: 1060px; }
+.settings-page .settings-section-heading { flex-wrap: wrap; }
+.settings-page .settings-note { overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+.settings-page { padding: 16px; }
+.settings-page .settings-row { flex-direction: row; align-items: flex-start; flex-wrap: wrap; }
+.settings-page .settings-row > .qib-field { flex: 1 1 150px; }
+.settings-page .settings-row > .settings-field { flex: 1 1 200px; }
+.settings-page .settings-row > .range-field { flex: 1 1 180px; }
+}
+.image-association-button { margin-top: 14px; }
+.settings-theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.settings-theme-option { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface-app); cursor: pointer; }
+.settings-theme-option:hover { border-color: var(--line-strong); }
+.settings-theme-option.selected { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.settings-theme-option input { position: absolute; top: 14px; right: 14px; margin: 0; accent-color: var(--accent); }
+.settings-theme-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settings-theme-preview { display: flex; gap: 8px; height: 74px; margin-right: 18px; padding: 10px; border: 1px solid rgba(128,128,128,.25); border-radius: 8px; background: #f3f5f3; }
+.settings-theme-preview > span { width: 22%; border-radius: 4px; background: #dce4dd; }
+.settings-theme-preview > i { flex: 1; border-radius: 4px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+.theme-preview-dark { background: #171d1a; }
+.theme-preview-dark > span { background: #34433b; }
+.theme-preview-dark > i { background: #28342d; }
+.theme-preview-system { background: linear-gradient(90deg, #f3f5f3 50%, #171d1a 50%); }
+.theme-preview-system > span { background: #dce4dd; }
+.theme-preview-system > i { background: linear-gradient(90deg, #fff 30%, #28342d 30%); }
+.settings-theme-copy { display: flex; flex-direction: column; gap: 3px; }
+.settings-theme-copy b { font-size: 13px; color: var(--text); }
+.settings-theme-copy small { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+@media (max-width: 900px) { .settings-theme-options { grid-template-columns: 1fr; } .settings-theme-option { flex-direction: row; align-items: center; } .settings-theme-preview { flex: 0 0 96px; margin-right: 0; } .settings-theme-copy { padding-right: 14px; } }

@@ -39,8 +39,8 @@ const items: ContentRecord[] = [
 ];
 
 describe("tray tabs", () => {
-  it("labels tabs and counts kinds, with 文本 covering both text kinds", () => {
-    expect(TRAY_TAB_LABEL.text).toBe("文本");
+  it("labels tabs and counts kinds, with 富文本 covering both stored text kinds", () => {
+    expect(TRAY_TAB_LABEL.text).toBe("富文本");
     const counts = trayTabCounts(items);
     expect(counts).toEqual({ all: 4, text: 2, image: 1, link: 1 });
     expect(trayTabMatches(items[1], "text")).toBe(true);

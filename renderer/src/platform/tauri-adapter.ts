@@ -28,6 +28,7 @@ import type {
   NewContentInput,
   NodeMove,
   PluginListing,
+  WindowResizeDirection,
 } from "../../../shared/image-board";
 
 function toError(caught: unknown): Error {
@@ -44,17 +45,18 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 }
 
 /** Bridge the async `listen` promise to the synchronous unsubscribe of the API. */
-function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
+function subscribe<T>(event: string, listener: (payload: T) => void, onReady?: (ready: Promise<void>) => void): () => void {
   let unlisten: (() => void) | undefined;
   let disposed = false;
   const ready = listen<T>(event, (message) => listener(message.payload))
     .then((fn) => {
       if (disposed) void fn();
       else unlisten = fn;
-    })
-    .catch((caught) => {
-      console.error(`${event} subscription failed`, caught);
     });
+  // Keep registration failures visible, while allowing a dependent handshake
+  // to reject instead of incorrectly declaring the renderer ready.
+  void ready.catch((caught) => console.error(`${event} subscription failed`, caught));
+  onReady?.(ready);
   return () => {
     disposed = true;
     if (unlisten) {
@@ -68,18 +70,24 @@ function subscribe<T>(event: string, listener: (payload: T) => void): () => void
         unlisten();
         unlisten = undefined;
       }
-    });
+    }, () => {});
   };
 }
 
 export function createTauriAdapter(): ImageBoardApi {
+  let imageOpenedReady: Promise<void> | undefined;
   return {
     readImage: (contentId) => call("read_image", { contentId }),
     saveImageCopy: (image) => call("save_image_copy", { image }),
     exportImage: (image) => call("export_image", { image }),
     openImageFile: () => call("open_image_file"),
-    takePendingImage: () => call("take_pending_image"),
-    onImageOpened: (listener) => subscribe("image:opened", listener),
+    takePendingImage: async () => {
+      // App installs this listener before taking the pending image. Native may
+      // switch to event delivery only after registration actually succeeds.
+      try { await imageOpenedReady; } catch (caught) { throw toError(caught); }
+      return call<{ state: AppState; contentId: string } | null>("take_pending_image");
+    },
+    onImageOpened: (listener) => subscribe("image:opened", listener, (ready) => { imageOpenedReady = ready; }),
     getImageAssociation: () => call("get_image_association"),
     configureImageAssociation: () => call("configure_image_association"),
     loadState: () => call<AppState>("load_state"),
@@ -136,6 +144,8 @@ export function createTauriAdapter(): ImageBoardApi {
     openExternalUrl: (url: string) => call<void>("open_external_url", { url }),
     listPlugins: () => call<PluginListing>("list_plugins"),
     startTitlebarDrag: () => call<void>("start_titlebar_drag"),
+    startResizeDragging: (direction: WindowResizeDirection) =>
+      call<void>("start_resize_dragging", { direction }),
     toggleMaximized: () => call<boolean>("toggle_maximized"),
     isMaximized: () => call<boolean>("is_maximized"),
     closeWindow: () => call<void>("close_window"),

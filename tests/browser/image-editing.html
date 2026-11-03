@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><style>html,body{margin:0;height:100%;overflow:hidden}#root{height:100%;display:flex;flex-direction:column}#editor{display:flex;flex:1;min-height:0}</style></head>
+<body><div id="root"><div id="toolbar"></div><div id="editor"></div></div><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ImageEditor } from '/renderer/src/pages/ImageEditor.tsx';
+import '/renderer/src/styles.css';
+const root = createRoot(document.getElementById('editor'));
+window.mountEditing = async (options = {}) => {
+  const source = document.createElement('canvas'); source.width = options.width ?? 240; source.height = options.height ?? 160;
+  const context = source.getContext('2d');
+  for (let y = 0; y < source.height; y += 4) for (let x = 0; x < source.width; x += 4) {
+    context.fillStyle = ((x / 4 + y / 4) % 2) ? '#11588b' : '#d3b85a'; context.fillRect(x, y, 4, 4);
+  }
+  const blob = await new Promise(resolve => source.toBlob(resolve));
+  const data = Array.from(new Uint8Array(await blob.arrayBuffer()));
+  window.originalPixels = Array.from(context.getImageData(0, 0, source.width, source.height).data);
+  window.editorApi = { current: {} };
+  window.imageBoard = {
+    readImage: async () => ({ data, mime: 'image/png' }),
+    saveImageCopy: async payload => { window.savedImage = payload; return { state: { marker: 'copy' }, contentId: 'edited' }; },
+    exportImage: async payload => { window.exportedImage = payload; return options.cancelExport ? null : 'image.png'; },
+  };
+  root.render(React.createElement(ImageEditor, {
+    content: { id: 'source', image: { fileName: '原图.png' } },
+    toolbarHost: options.host === 'null' ? null : options.host === 'undefined' ? undefined : document.getElementById('toolbar'),
+    apiRef: window.editorApi,
+    onCancel: () => { window.cancelled = true; },
+    onSaved: async result => {
+      window.savedResult = result;
+      if (options.holdSave) await new Promise((resolve, reject) => { window.finishSave = resolve; window.rejectSave = () => reject(new Error('放置失败')); });
+      window.saved = true;
+    },
+    onError: message => { window.editorError = message; },
+    onNotice: message => { window.editorNotice = message; },
+  }));
+};
+</script></body></html>

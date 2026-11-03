@@ -7,12 +7,11 @@
 //! click and hidden on focus loss.
 
 use crate::error::AppError;
-use crate::platform;
 use crate::window_geometry::{self, Rect};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow};
 
 const BOUNDS_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
@@ -21,75 +20,8 @@ pub(crate) const MAIN_NAVIGATE_EVENT: &str = "main:navigate";
 
 struct Inner {
     handle: AppHandle,
-    /// Fake-maximize bookkeeping. It lives behind its own type so the lock-free
-    /// read path used by window-event callbacks can never accidentally take
-    /// the restore mutex.
-    maximize: MaximizeState,
     shutdown_requested: AtomicBool,
     bounds_saver: BoundsSaver,
-}
-
-/// Fake-maximize state of the main window: the pre-maximize bounds plus a
-/// lock-free "is maximized" flag.
-///
-/// `Rect`s are copied in and out of the mutex, so no lock outlives a method
-/// call and none is ever held while a window API runs. That matters because
-/// tao dispatches `Resized`/`Moved` re-entrantly from inside
-/// `SetWindowPos`/`SetWindowSize`: those events land in
-/// `note_window_geometry_changed`, which reads only the atomic flag.
-#[derive(Default)]
-struct MaximizeState {
-    restore: Mutex<Option<Rect>>,
-    maximized: AtomicBool,
-}
-
-impl MaximizeState {
-    /// Lock-free: safe from a window-event callback.
-    fn is_maximized(&self) -> bool {
-        self.maximized.load(Ordering::Acquire)
-    }
-
-    /// Whether a geometry change may be remembered. Reachable from the
-    /// window-event callback, so it must never block.
-    fn should_schedule_save(&self) -> bool {
-        !self.is_maximized()
-    }
-
-    /// Record the pre-maximize bounds and flip the flag *before* the caller
-    /// applies the maximized bounds: the re-entrant `Resized`/`Moved` events
-    /// then skip the bounds saver instead of queueing the maximized frame.
-    fn begin_maximize(&self, current: Rect) {
-        *self.lock_restore() = Some(current);
-        self.maximized.store(true, Ordering::Release);
-    }
-
-    /// Take the restore bounds (clearing the slot) without touching the flag:
-    /// the caller applies them while the window still counts as maximized.
-    fn take_restore(&self) -> Option<Rect> {
-        self.lock_restore().take()
-    }
-
-    /// Put the restore bounds back after a failed restore.
-    fn put_restore(&self, bounds: Rect) {
-        *self.lock_restore() = Some(bounds);
-    }
-
-    /// The restore completed: the window is a normal window again.
-    fn mark_restored(&self) {
-        self.maximized.store(false, Ordering::Release);
-    }
-
-    /// Roll a failed maximize back to the pre-toggle state.
-    fn cancel_maximize(&self) {
-        *self.lock_restore() = None;
-        self.maximized.store(false, Ordering::Release);
-    }
-
-    fn lock_restore(&self) -> std::sync::MutexGuard<'_, Option<Rect>> {
-        self.restore
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-    }
 }
 
 /// Handle shared with the commands and setup.
@@ -196,12 +128,7 @@ fn bounds_saver_loop(handle: &AppHandle, receiver: &mpsc::Receiver<()>, stop: &A
 /// Runs on the bounds-saver worker thread, so the window queries below are
 /// safe: nothing here holds a lock across them.
 fn save_user_bounds(handle: &AppHandle) -> Result<(), AppError> {
-    let Some(controller) = handle.try_state::<WindowController>() else {
-        return Ok(());
-    };
-    // Reads the fake-maximize flag plus the window's own natively maximized
-    // state, without holding any lock across the query.
-    if !crate::window_geometry::should_persist_bounds(controller.is_maximized()) {
+    if handle.try_state::<WindowController>().is_none() {
         return Ok(());
     }
     // The window may already be gone (teardown races the debounce): nothing to
@@ -209,6 +136,11 @@ fn save_user_bounds(handle: &AppHandle) -> Result<(), AppError> {
     let Ok(win) = main_window(handle) else {
         return Ok(());
     };
+    // A minimize can arrive while a move/resize is being debounced. Its
+    // off-screen Windows frame must never replace the normal restore bounds.
+    if !window_geometry::should_persist_bounds(win.is_maximized()?, win.is_minimized()?) {
+        return Ok(());
+    }
     let rect = logical_rect(&win)?;
     let monitor = win
         .current_monitor()
@@ -243,24 +175,14 @@ fn monitor_work_area_logical(monitor: &tauri::Monitor) -> Rect {
     }
 }
 
-fn work_area_at(win: &WebviewWindow, physical_x: f64, physical_y: f64) -> Result<Rect, AppError> {
-    let monitor = win
-        .monitor_from_point(physical_x, physical_y)?
-        .or_else(|| win.current_monitor().ok().flatten())
-        .ok_or_else(|| AppError::message("无法获取显示器工作区"))?;
-    Ok(monitor_work_area_logical(&monitor))
-}
-
-fn set_logical_bounds(win: &WebviewWindow, bounds: Rect) -> Result<(), AppError> {
-    let scale = win.scale_factor()?;
+fn set_logical_bounds(win: &WebviewWindow, bounds: Rect, scale: f64) -> Result<(), AppError> {
+    // Global logical positions in the preferences use the saved monitor's DPI.
+    // Use that monitor's factor, not the hidden window's initial primary DPI.
     win.set_position(PhysicalPosition::new(
         (bounds.x as f64 * scale).round() as i32,
         (bounds.y as f64 * scale).round() as i32,
     ))?;
-    win.set_size(PhysicalSize::new(
-        (bounds.width as f64 * scale).round() as u32,
-        (bounds.height as f64 * scale).round() as u32,
-    ))?;
+    win.set_size(LogicalSize::new(bounds.width as f64, bounds.height as f64))?;
     Ok(())
 }
 
@@ -295,7 +217,6 @@ impl WindowController {
         Self {
             inner: Arc::new(Inner {
                 handle,
-                maximize: MaximizeState::default(),
                 shutdown_requested: AtomicBool::new(false),
                 bounds_saver,
             }),
@@ -306,42 +227,40 @@ impl WindowController {
     /// to the hidden main window. Runs once during setup, before the reveal.
     pub fn restore_main_bounds(&self) -> Result<(), AppError> {
         let win = main_window(&self.inner.handle)?;
-        let monitor = win
-            .current_monitor()
-            .ok()
-            .flatten()
+        let saved_monitor = self
+            .inner
+            .handle
+            .try_state::<crate::desktop::DesktopState>()
+            .and_then(|desktop| desktop.current().window_bounds)
+            .and_then(|bounds| bounds.monitor);
+        let monitor = saved_monitor
+            .and_then(|name| {
+                win.available_monitors()
+                    .ok()?
+                    .into_iter()
+                    .find(|monitor| monitor.name() == Some(&name))
+            })
+            .or_else(|| win.current_monitor().ok().flatten())
             .or_else(|| win.primary_monitor().ok().flatten())
             .ok_or_else(|| AppError::message("无法获取显示器"))?;
         let work_area = monitor_work_area_logical(&monitor);
         let saved = saved_window_bounds(&self.inner.handle);
         let bounds = window_geometry::fit_main_window(saved, work_area);
-        set_logical_bounds(&win, bounds)?;
-        set_main_window_flags(&win)
+        set_main_window_flags(&win)?;
+        set_logical_bounds(&win, bounds, monitor.scale_factor())
     }
 
-    /// A window resize/move was observed. The user's bounds are remembered
-    /// (debounced); maximized frames are never persisted.
+    /// Called re-entrantly by tao from native move/size APIs. Only signal the
+    /// worker here: no window query and no lock may run on this callback path.
     pub fn note_window_geometry_changed(&self) {
-        // Lock-free on purpose: tao dispatches window events re-entrantly from
-        // inside SetWindowPos/SetWindowSize, which a command on the UI thread
-        // may still be executing. No locks, no window APIs here.
-        if !self.inner.maximize.should_schedule_save()
-            || self.inner.shutdown_requested.load(Ordering::Acquire)
-        {
-            return;
+        if !self.inner.shutdown_requested.load(Ordering::Acquire) {
+            self.inner.bounds_saver.request();
         }
-        self.inner.bounds_saver.request();
     }
 
-    /// Whether the main window is maximized: either the fake maximize applied
-    /// by this controller or a native maximize (Win+Up / aero snap) that only
-    /// the window itself knows about. No lock is held while the window is
-    /// queried, and window-event callbacks never call this (they read the
-    /// atomic flag through `should_schedule_save`).
+    /// Native state is the single source of truth for titlebar buttons,
+    /// double-click, Win+Up/Down and Aero snap/drag-to-restore alike.
     pub fn is_maximized(&self) -> bool {
-        if self.inner.maximize.is_maximized() {
-            return true;
-        }
         main_window(&self.inner.handle)
             .map(|win| win.is_maximized().unwrap_or(false))
             .unwrap_or(false)
@@ -349,68 +268,40 @@ impl WindowController {
 
     pub fn toggle_maximized(&self) -> Result<bool, AppError> {
         let win = main_window(&self.inner.handle)?;
-        // The restore bounds are copied out and the flag flipped BEFORE the
-        // window APIs: Resized/Moved fire synchronously inside
-        // set_position/set_size and re-enter the event handler, so no lock may
-        // be held here (see note_window_geometry_changed).
-        if let Some(bounds) = self.inner.maximize.take_restore() {
-            if let Err(error) = set_logical_bounds(&win, bounds) {
-                // The window may still be maximized: keep the toggle intact.
-                self.inner.maximize.put_restore(bounds);
-                return Err(error);
-            }
-            self.inner.maximize.mark_restored();
-            return Ok(false);
+        let maximized = !win.is_maximized()?;
+        if maximized {
+            win.maximize()?;
+        } else {
+            win.unmaximize()?;
         }
-        let current = logical_rect(&win)?;
-        let scale = win.scale_factor()?;
-        let work = work_area_at(
-            &win,
-            (current.x + current.width / 2) as f64 * scale,
-            (current.y + current.height / 2) as f64 * scale,
-        )?;
-        self.inner.maximize.begin_maximize(current);
-        if let Err(error) = set_logical_bounds(&win, work) {
-            self.inner.maximize.cancel_maximize();
-            return Err(error);
-        }
-        Ok(true)
+        // Restoring must schedule a save even if all move/resize events were
+        // emitted during the native transition. The worker filters max/min.
+        self.inner.bounds_saver.request();
+        win.emit("window:maximized-changed", maximized)?;
+        Ok(maximized)
     }
 
-    /// Restore a maximized window to its saved bounds before a titlebar drag,
-    /// keeping the grab point under the cursor.
+    /// The native HTCAPTION loop owns drag-to-restore, the cursor grab point,
+    /// mixed-DPI monitor transitions and Aero snap. Moving a work-area-sized
+    /// normal window by hand cannot provide those Windows semantics.
     pub fn start_titlebar_drag(&self) -> Result<(), AppError> {
         let win = main_window(&self.inner.handle)?;
-        if let Some(saved) = self.inner.maximize.take_restore() {
-            // Window APIs run with NO lock held (see note_window_geometry_changed).
-            let restored = (|| {
-                let current = logical_rect(&win)?;
-                let scale = win.scale_factor()?;
-                let cursor = platform::cursor_position()?;
-                let x = cursor.0 as f64 / scale;
-                let y = cursor.1 as f64 / scale;
-                let ratio =
-                    ((x - current.x as f64) / current.width.max(1) as f64).clamp(0.0, 1.0);
-                let bounds = Rect {
-                    x: (x - saved.width as f64 * ratio).round() as i32,
-                    y: (y - (y - current.y as f64).clamp(0.0, 40.0)).round() as i32,
-                    ..saved
-                };
-                set_logical_bounds(&win, bounds)
-            })();
-            match restored {
-                Ok(()) => self.inner.maximize.mark_restored(),
-                Err(error) => {
-                    // Still maximized: the next drag retries the restore.
-                    self.inner.maximize.put_restore(saved);
-                    return Err(error);
-                }
-            }
-        }
-        self.inner
-            .handle
-            .emit("window:maximized-changed", false)?;
         win.start_dragging()?;
+        Ok(())
+    }
+
+    /// Start the OS sizing loop, keeping content pointer handlers out of the
+    /// gesture. This always targets main; tray sizing/anchoring is untouched.
+    pub fn start_resize_dragging(&self, direction: &str) -> Result<(), AppError> {
+        let win = main_window(&self.inner.handle)?;
+        // Infer the SDK's native ResizeDirection here (not re-exported by
+        // tauri). Its Deserialize implementation validates all eight names.
+        let direction = serde_json::from_value(serde_json::Value::String(direction.to_owned()))
+            .map_err(|_| AppError::message("无效的窗口缩放方向"))?;
+        if win.is_maximized()? || win.is_minimized()? {
+            return Ok(());
+        }
+        win.as_ref().window().start_resize_dragging(direction)?;
         Ok(())
     }
 
@@ -515,115 +406,5 @@ impl WindowController {
         panel.show()?;
         panel.set_focus()?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
-        Rect {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    #[test]
-    fn maximize_round_trip_keeps_the_restore_bounds() {
-        let state = MaximizeState::default();
-        let original = rect(40, 60, 1000, 700);
-        assert!(state.should_schedule_save());
-        state.begin_maximize(original);
-        assert!(state.is_maximized());
-        // While maximized, the re-entrant geometry events are ignored.
-        assert!(!state.should_schedule_save());
-        // The restore rect is returned once and the slot is emptied *before*
-        // the caller touches the window.
-        assert_eq!(state.take_restore(), Some(original));
-        assert_eq!(state.take_restore(), None);
-        state.mark_restored();
-        assert!(!state.is_maximized());
-        assert!(state.should_schedule_save());
-    }
-
-    #[test]
-    fn a_failed_maximize_leaves_no_restore_bounds() {
-        let state = MaximizeState::default();
-        state.begin_maximize(rect(10, 20, 800, 600));
-        state.cancel_maximize();
-        assert!(!state.is_maximized());
-        assert_eq!(state.take_restore(), None);
-    }
-
-    #[test]
-    fn a_failed_restore_keeps_the_restore_bounds() {
-        let state = MaximizeState::default();
-        state.begin_maximize(rect(10, 20, 800, 600));
-        let saved = state.take_restore().expect("restore bounds");
-        state.put_restore(saved);
-        // Still maximized, and the next toggle/drag retries the restore.
-        assert!(state.is_maximized());
-        assert_eq!(state.take_restore(), Some(saved));
-    }
-
-    /// tao re-enters the window-event handler while a window API is running.
-    /// The handler path (`note_window_geometry_changed`) must never wait on the
-    /// restore mutex, which the legacy implementation held across
-    /// `set_position`/`set_size` — the self-deadlock that froze the UI thread.
-    #[test]
-    fn the_geometry_handler_ignores_the_restore_lock() {
-        let state = Arc::new(MaximizeState::default());
-        state.begin_maximize(rect(0, 0, 1280, 800));
-        // A toggle is mid-flight on the UI thread: the restore slot is locked.
-        let guard = state.lock_restore();
-        let (sender, receiver) = mpsc::channel();
-        let probe = {
-            let state = Arc::clone(&state);
-            std::thread::spawn(move || {
-                let _ = sender.send((state.should_schedule_save(), state.is_maximized()));
-            })
-        };
-        let observed = receiver
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the geometry handler blocked on the restore lock");
-        drop(guard);
-        probe.join().expect("probe thread");
-        assert_eq!(observed, (false, true));
-    }
-
-    /// Full toggle shape with the window API re-entering the handler on the
-    /// same thread, as tao does: it must finish, must not queue the maximized
-    /// frame for saving, and must queue the restored geometry afterwards.
-    #[test]
-    fn a_toggle_with_reentrant_geometry_events_completes() {
-        let (sender, receiver) = mpsc::channel();
-        let finished = std::thread::spawn(move || {
-            let state = MaximizeState::default();
-            let mut saves = Vec::new();
-            // The "window": every applied bounds dispatches Resized/Moved
-            // synchronously into the geometry handler.
-            let mut apply = |state: &MaximizeState| saves.push(state.should_schedule_save());
-
-            let original = rect(100, 100, 1000, 700);
-            state.begin_maximize(original);
-            apply(&state);
-            let restore = state.take_restore().expect("restore bounds");
-            apply(&state);
-            state.mark_restored();
-            apply(&state);
-            let _ = sender.send(saves);
-            restore
-        });
-        let saves = receiver
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the toggle deadlocked on its own re-entrant events");
-        let restore = finished.join().expect("toggle thread");
-        assert_eq!(restore, rect(100, 100, 1000, 700));
-        // Maximized: skipped; still maximized while restoring: skipped; after
-        // the restore: remembered.
-        assert_eq!(saves, vec![false, false, true]);
     }
 }

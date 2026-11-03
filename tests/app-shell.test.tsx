@@ -173,7 +173,8 @@ test('settings has one entry in the sidebar footer and opens from there', async 
   expect(settings.closest('.sidebar-footer')).toBeTruthy();
   expect(document.querySelector('.topbar .settings-button')).toBeNull();
   fireEvent.click(settings);
-  expect(await screen.findByRole('heading', { name: '设置', level: 1 })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '画布', level: 1 })).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: '设置项目' })).toBeTruthy();
   expect(settings.getAttribute('aria-pressed')).toBe('true');
 });
 

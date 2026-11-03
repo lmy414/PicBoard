@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ContentRecord } from "../../../shared/image-board";
 import { formatByteSize } from "../content/content-meta";
@@ -37,9 +37,10 @@ interface DragState {
  * double-click fit ↔ 100%. Gestures write the transform and the zoom label
  * straight to the DOM; no React state updates per frame.
  */
-export function ImageContentPage({ content, onError, toolbarHost }: { content: ContentRecord; onError(message: string): void; toolbarHost?: HTMLElement | null }) {
+export function ImageContentPage({ content, onError, toolbarHost, compact = false }: { content: ContentRecord; onError(message: string): void; toolbarHost?: HTMLElement | null; compact?: boolean }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const viewRef = useRef<View>({ scale: 1, x: 0, y: 0 });
   const targetRef = useRef<View>({ scale: 1, x: 0, y: 0 });
   const frameRef = useRef<number | null>(null);
@@ -232,7 +233,7 @@ export function ImageContentPage({ content, onError, toolbarHost }: { content: C
     return () => element.removeEventListener("wheel", listener);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = viewportRef.current;
     if (!element) return;
     const measure = () => {
@@ -264,8 +265,7 @@ export function ImageContentPage({ content, onError, toolbarHost }: { content: C
     [],
   );
 
-  const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    const imageElement = event.currentTarget;
+  const markImageLoaded = useCallback((imageElement: HTMLImageElement) => {
     const width = imageElement.naturalWidth || naturalRef.current.width;
     const height = imageElement.naturalHeight || naturalRef.current.height;
     setLoaded(true);
@@ -285,7 +285,18 @@ export function ImageContentPage({ content, onError, toolbarHost }: { content: C
     } else {
       setViewImmediate(viewRef.current);
     }
-  };
+  }, [computeFit, initializeToFit, setViewImmediate]);
+
+  // A memory-cached image can finish before React attaches its load handler.
+  // Fit and reveal that image during layout, before the first visible frame.
+  useLayoutEffect(() => {
+    const element = imageRef.current;
+    if (!element) return;
+    element.fetchPriority = "high";
+    if (element.complete && element.naturalWidth > 0) markImageLoaded(element);
+  }, [imageUrl, markImageLoaded]);
+
+  const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => markImageLoaded(event.currentTarget);
 
   const handleImageError = () => {
     setFailed(true);
@@ -363,7 +374,7 @@ export function ImageContentPage({ content, onError, toolbarHost }: { content: C
 
   return (
     <div className="cp-image-page">
-      {toolbarHost === undefined && <div className="cp-image-meta">
+      {toolbarHost === undefined && !compact && <div className="cp-image-meta">
         <span className="cp-image-name" title={image?.fileName ?? content.preview}>
           {image?.fileName ?? content.preview}
         </span>
@@ -392,16 +403,19 @@ export function ImageContentPage({ content, onError, toolbarHost }: { content: C
           style={{ width: natural.width || 1, height: natural.height || 1 }}
         >
           <img
+            ref={imageRef}
             className={`cp-image${loaded ? " is-loaded" : ""}`}
             src={imageUrl}
             alt={image?.fileName ?? "图片"}
             draggable={false}
             decoding="async"
+            loading="eager"
+            style={{ transition: "none" }}
             onLoad={handleImageLoad}
             onError={handleImageError}
           />
         </div>
-        <div className={`cp-image-loading${loaded || failed ? " is-done" : ""}`} aria-hidden="true" />
+        <div className={`cp-image-loading${loaded || failed ? " is-done" : ""}`} aria-hidden="true" hidden={loaded || failed} />
         {failed ? (
           <div className="cp-image-failed motion-fade" data-motion="enter" role="alert">
             <strong>图片载入失败</strong>

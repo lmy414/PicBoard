@@ -57,8 +57,12 @@ fn main_size_for(work_area: Rect) -> (i32, i32) {
 /// Position a rect so it is fully inside `work_area` (positions clamp before
 /// sizes overflow a smaller-than-window work area).
 fn clamp_position(rect: &mut Rect, work_area: Rect) {
-    let max_x = work_area.x.max(work_area.right().saturating_sub(rect.width));
-    let max_y = work_area.y.max(work_area.bottom().saturating_sub(rect.height));
+    let max_x = work_area
+        .x
+        .max(work_area.right().saturating_sub(rect.width));
+    let max_y = work_area
+        .y
+        .max(work_area.bottom().saturating_sub(rect.height));
     rect.x = rect.x.clamp(work_area.x, max_x);
     rect.y = rect.y.clamp(work_area.y, max_y);
 }
@@ -161,8 +165,8 @@ pub fn anchor_tray_panel(
 
 /// The bounds saver never persists a maximized frame: restoring from the
 /// maximize is the user's chosen geometry.
-pub(crate) fn should_persist_bounds(maximized: bool) -> bool {
-    !maximized
+pub(crate) fn should_persist_bounds(maximized: bool, minimized: bool) -> bool {
+    !maximized && !minimized
 }
 
 #[cfg(test)]
@@ -180,8 +184,10 @@ mod tests {
 
     #[test]
     fn maximized_frames_are_never_persisted() {
-        assert!(!should_persist_bounds(true));
-        assert!(should_persist_bounds(false));
+        assert!(!should_persist_bounds(true, false));
+        assert!(!should_persist_bounds(false, true));
+        assert!(!should_persist_bounds(true, true));
+        assert!(should_persist_bounds(false, false));
     }
 
     #[test]
@@ -271,7 +277,10 @@ mod tests {
             }),
             area,
         );
-        assert_eq!((restored.width, restored.height), (MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT));
+        assert_eq!(
+            (restored.width, restored.height),
+            (MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)
+        );
     }
 
     #[test]
@@ -371,7 +380,12 @@ mod tests {
             width: 40,
             height: 40,
         };
-        let panel = anchor_tray_panel(tray_on_right, right_area, TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT);
+        let panel = anchor_tray_panel(
+            tray_on_right,
+            right_area,
+            TRAY_PANEL_WIDTH,
+            TRAY_PANEL_HEIGHT,
+        );
         assert_eq!(panel.x, tray_on_right.x - PANEL_GAP - TRAY_PANEL_WIDTH);
         // Vertically centered on the icon, clamped into the work area.
         assert!(panel.y >= right_area.y && panel.bottom() <= right_area.bottom());
@@ -415,7 +429,10 @@ mod tests {
         };
         let panel = anchor_tray_panel(tray, area, TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT);
         // The panel keeps its size and its top-left stays inside the work area.
-        assert_eq!((panel.width, panel.height), (TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT));
+        assert_eq!(
+            (panel.width, panel.height),
+            (TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT)
+        );
         assert!(panel.x >= area.x && panel.x <= area.right());
         assert!(panel.y >= area.y && panel.y <= area.bottom());
     }

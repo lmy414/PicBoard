@@ -1,7 +1,3 @@
-mod windows;
-
-pub use windows::cursor_position;
-
 /// Run `task` on a short-lived worker thread.
 ///
 /// tao dispatches window events re-entrantly from inside window API calls, so

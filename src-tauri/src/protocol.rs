@@ -17,11 +17,14 @@ use tauri::{Manager, UriSchemeResponder};
 
 /// Longest side a thumbnail may keep before it is downscaled.
 const THUMB_LONGEST_SIDE: f64 = 768.0;
-/// Fixed number of image-protocol workers. Bounded so a library full of
+/// Fixed number of thumbnail workers. Bounded so a library full of
 /// uncached screenshots cannot start dozens of full-resolution decodes at once
 /// (a 4K RGBA decode alone is ~33 MB); four workers already saturate the disk
 /// and CPU for a desktop panel.
-const PROTOCOL_WORKERS: usize = 4;
+const THUMBNAIL_WORKERS: usize = 4;
+/// Original bytes require file IO only. Separate workers keep an interactive
+/// full-image request from waiting behind cold thumbnail decodes.
+const ORIGINAL_WORKERS: usize = 2;
 
 type ProtocolJob = (tauri::AppHandle, String, UriSchemeResponder);
 
@@ -30,16 +33,39 @@ struct ProtocolPool {
     sender: Mutex<mpsc::Sender<ProtocolJob>>,
 }
 
-static POOL: LazyLock<ProtocolPool> = LazyLock::new(ProtocolPool::start);
+static THUMBNAIL_POOL: LazyLock<ProtocolPool> =
+    LazyLock::new(|| ProtocolPool::start("thumbnail", THUMBNAIL_WORKERS));
+static ORIGINAL_POOL: LazyLock<ProtocolPool> =
+    LazyLock::new(|| ProtocolPool::start("original", ORIGINAL_WORKERS));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestLane {
+    Original,
+    Thumbnail,
+}
+
+fn request_lane(path: &str) -> RequestLane {
+    match parse_request_path(path) {
+        Some(ImageRequest::Full(_) | ImageRequest::Asset { .. }) => RequestLane::Original,
+        _ => RequestLane::Thumbnail,
+    }
+}
+
+fn request_pool(path: &str) -> &'static ProtocolPool {
+    match request_lane(path) {
+        RequestLane::Original => &ORIGINAL_POOL,
+        RequestLane::Thumbnail => &THUMBNAIL_POOL,
+    }
+}
 
 impl ProtocolPool {
-    fn start() -> Self {
+    fn start(lane: &str, workers: usize) -> Self {
         let (sender, receiver) = mpsc::channel::<ProtocolJob>();
         let receiver = Arc::new(Mutex::new(receiver));
-        for index in 0..PROTOCOL_WORKERS {
+        for index in 0..workers {
             let receiver = Arc::clone(&receiver);
             let spawned = std::thread::Builder::new()
-                .name(format!("picboard-image-{index}"))
+                .name(format!("picboard-image-{lane}-{index}"))
                 .spawn(move || loop {
                     let job = {
                         // Hold the lock only while taking a job, never while
@@ -75,7 +101,7 @@ impl ProtocolPool {
 /// Hand one request to the pool. Cheap: the calling (WebView2) thread only
 /// enqueues; decoding, cache generation and file IO happen on a worker.
 pub fn submit(app: tauri::AppHandle, path: String, responder: UriSchemeResponder) {
-    if let Err((_app, _path, responder)) = POOL.submit((app, path, responder)) {
+    if let Err((_app, _path, responder)) = request_pool(&path).submit((app, path, responder)) {
         // The pool is gone; answer instead of leaving the request hanging.
         responder.respond(not_found());
     }
@@ -314,6 +340,49 @@ fn read_image_dimensions(path: &Path) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_content_and_assets_use_a_queue_separate_from_thumbnail_decodes() {
+        let content = "6f1e0f3c-1234-4a5b-8c9d-0123456789ab";
+        let asset = "7f1e0f3c-1234-4a5b-8c9d-0123456789ab";
+        assert_eq!(request_lane("/full%2Fplain_id"), RequestLane::Original);
+        assert_eq!(request_lane(&format!("/asset/{content}/{asset}")), RequestLane::Original);
+        assert_eq!(request_lane("/thumb%2Fplain_id"), RequestLane::Thumbnail);
+        assert_eq!(request_lane(&format!("/asset-thumb/{content}/{asset}")), RequestLane::Thumbnail);
+        assert_eq!(request_lane("/full/../secret"), RequestLane::Thumbnail);
+
+    }
+
+    #[test]
+    #[ignore = "Set PICBOARD_PROTOCOL_BENCH_PATHS to local image files; run --ignored --nocapture"]
+    fn benchmark_original_lookup_and_read() {
+        use std::time::Instant;
+        let paths = std::env::var_os("PICBOARD_PROTOCOL_BENCH_PATHS").expect("benchmark input paths");
+        let root = tempfile::tempdir().unwrap();
+        let mut store = crate::storage::ImageBoardStorage::new(root.path().join("data"));
+        for path in std::env::split_paths(&paths) {
+            let bytes = std::fs::read(&path).unwrap();
+            let name = path.file_name().unwrap().to_str().unwrap();
+            let ingest_started = Instant::now();
+            let saved = store.save_image_copy(name, &bytes).unwrap();
+            let ingest_ms = ingest_started.elapsed().as_secs_f64() * 1000.0;
+            // Ingestion is reported separately from the original read path.
+            let mut lookup = Vec::new();
+            let mut total = Vec::new();
+            for _ in 0..20 {
+                let started = Instant::now();
+                let resolved = store.resolve_image(&saved.content_id).unwrap();
+                lookup.push(started.elapsed().as_secs_f64() * 1000.0);
+                let response = serve_original(&resolved);
+                total.push(started.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(response.status(), 200);
+                assert_eq!(response.body(), &bytes, "original bytes remain unchanged");
+            }
+            lookup.sort_by(f64::total_cmp);
+            total.sort_by(f64::total_cmp);
+            eprintln!("PICBOARD_ORIGINAL_BENCH name={name} bytes={} ingest_ms={ingest_ms:.3} lookup_median_ms={:.3} lookup_max_ms={:.3} lookup_read_median_ms={:.3} lookup_read_max_ms={:.3}", bytes.len(), lookup[10], lookup[19], total[10], total[19]);
+        }
+    }
 
     #[test]
     fn accepts_thumb_and_full_for_plain_ids() {

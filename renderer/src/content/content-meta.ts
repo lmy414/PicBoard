@@ -8,13 +8,25 @@ import type { AppState, ContentKind, ContentRecord } from "../../../shared/image
  */
 
 export const KIND_LABEL: Record<ContentKind, string> = {
-  text: "文本",
+  text: "富文本",
   richText: "富文本",
   link: "链接",
   image: "图片",
 };
 
-export const KIND_ORDER: ContentKind[] = ["text", "richText", "link", "image"];
+/** Storage keeps legacy text; content surfaces expose one rich-text kind. */
+export type DisplayContentKind = Exclude<ContentKind, "text">;
+
+export const KIND_ORDER: DisplayContentKind[] = ["richText", "link", "image"];
+
+export function displayContentKind(kind: ContentKind): DisplayContentKind {
+  return kind === "text" ? "richText" : kind;
+}
+
+/** Both stored text kinds belong to the same user-facing filter. */
+export function matchesContentKind(content: ContentRecord, filter: ContentKind | "all"): boolean {
+  return filter === "all" || displayContentKind(content.kind) === displayContentKind(filter);
+}
 
 const UNTITLED = "未命名";
 const MAX_TITLE_LENGTH = 60;

@@ -9,12 +9,13 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { createTauriAdapter } from '../renderer/src/platform/tauri-adapter';
-import type { AppState } from '../shared/image-board';
+import type { AppState, WindowResizeDirection } from '../shared/image-board';
 
 const state = { activeCanvasId: 'root', canvases: [], categories: [], contents: {}, edges: [] } as unknown as AppState;
 
 beforeEach(() => {
   vi.mocked(invoke).mockReset().mockResolvedValue(state as never);
+  vi.mocked(listen).mockReset().mockResolvedValue(vi.fn() as never);
 });
 
 test('every renderer command maps to the contract wire name and argument keys', async () => {
@@ -156,4 +157,55 @@ test('tray navigation requests subscribe to main:navigate', async () => {
   expect(listener).toHaveBeenCalledWith({ view: 'library' });
   unsubscribe();
   expect(unlisten).toHaveBeenCalled();
+});
+
+
+test('titlebar and all eight sizing gestures use the main-window native commands', async () => {
+  const api = createTauriAdapter();
+  await api.startTitlebarDrag();
+  expect(invoke).toHaveBeenLastCalledWith('start_titlebar_drag', undefined);
+  const directions: WindowResizeDirection[] = ['North', 'NorthEast', 'East', 'SouthEast', 'South', 'SouthWest', 'West', 'NorthWest'];
+  for (const direction of directions) {
+    await api.startResizeDragging(direction);
+    expect(invoke).toHaveBeenLastCalledWith('start_resize_dragging', { direction });
+  }
+  vi.mocked(invoke).mockRejectedValueOnce('无效的窗口缩放方向');
+  await expect(api.startResizeDragging('East')).rejects.toThrow('无效的窗口缩放方向');
+});
+
+
+test('pending-image handshake waits for delayed native listener registration', async () => {
+  let register!: (unlisten: () => void) => void;
+  const registered = new Promise<() => void>((resolve) => { register = resolve; });
+  vi.mocked(listen).mockReturnValueOnce(registered as never);
+  vi.mocked(invoke).mockResolvedValue(null as never);
+  const api = createTauriAdapter();
+  const opened = vi.fn();
+  const unsubscribe = api.onImageOpened(opened);
+  const pending = api.takePendingImage();
+  await Promise.resolve();
+  expect(invoke).not.toHaveBeenCalled();
+  const unlisten = vi.fn();
+  register(unlisten);
+  await expect(pending).resolves.toBeNull();
+  expect(invoke).toHaveBeenCalledTimes(1);
+  expect(invoke).toHaveBeenLastCalledWith('take_pending_image', undefined);
+  const handler = vi.mocked(listen).mock.calls[0][1] as unknown as (event: { payload: { state: AppState; contentId: string } }) => void;
+  handler({ payload: { state, contentId: 'image-after-handshake' } });
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(opened).toHaveBeenLastCalledWith({ state, contentId: 'image-after-handshake' });
+  unsubscribe();
+  expect(unlisten).toHaveBeenCalledTimes(1);
+});
+
+test('failed image listener registration leaves native pending delivery unclaimed', async () => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    vi.mocked(listen).mockRejectedValueOnce(new Error('listener registration failed'));
+    const api = createTauriAdapter();
+    const unsubscribe = api.onImageOpened(vi.fn());
+    await expect(api.takePendingImage()).rejects.toThrow('listener registration failed');
+    expect(invoke).not.toHaveBeenCalled();
+    unsubscribe();
+  } finally { log.mockRestore(); }
 });

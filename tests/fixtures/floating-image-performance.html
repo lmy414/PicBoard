@@ -1,0 +1,61 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Image viewer performance</title></head><body><div id="root"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from '/renderer/src/App.tsx';
+import '/renderer/src/styles.css';
+const query = new URLSearchParams(location.search);
+const sample = JSON.parse(query.get('sample'));
+localStorage.clear(); localStorage.setItem('quick-image-board.history-open','0'); localStorage.setItem('quick-image-board.sidebar-collapsed','1');
+const iso='2026-11-03T12:00:00.000Z';
+const content={id:'perf-image',kind:'image',preview:sample.name,textLength:0,url:null,image:{fileName:sample.name,relativePath:sample.name,width:sample.width,height:sample.height,byteSize:sample.bytes},coverAsset:null,categoryId:null,source:'manual',createdAt:iso,updatedAt:iso,lastUsedAt:iso};
+let state={revision:1,activeCanvasId:'main',contents:{[content.id]:content},categories:[],edges:[],canvases:[{id:'main',name:'图片性能测试',parentId:null,frame:null,createdAt:iso,viewport:{x:0,y:0,zoom:1},nodes:[{id:'perf-node',contentId:content.id,x:100,y:130,width:280,height:200}]}]};
+const thumb='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="280" height="200"><rect width="280" height="200" fill="#c9d5bf"/></svg>');
+window.imageBoard={
+  loadState:async()=>state,onStateChanged:()=>()=>{},isMaximized:async()=>false,
+  getDesktopSettings:async()=>({closeBehavior:'tray',autoStart:false,autoStartAvailable:false,captureEnabled:true,historyRetentionDays:30,snapToGrid:false,gridSize:24}),
+  imageUrl:(_id,variant)=>variant==='full'?sample.url:thumb,
+  setCanvasViewport:async(id,viewport)=>{state={...state,canvases:state.canvases.map(c=>c.id===id?{...c,viewport}:c)};return state;},
+  setActiveCanvas:async(id)=>{state={...state,activeCanvasId:id};return state;},
+};
+let pending=null, latest=null;
+window.imageViewBenchmark={
+  arm(){ latest=null; pending={}; pending.promise=new Promise((resolve,reject)=>{pending.resolve=resolve;pending.reject=reject;}); },
+  result(){return pending.promise;},
+};
+document.addEventListener('dblclick',event=>{
+  if(!pending||!event.target.closest('.canvas-node'))return;
+  const run=pending, start=performance.now();
+  let firstFrameMs=null,fullOpacityMs=null,decodeMs=null,source=null,decodeStarted=false,raf=0;
+  const timeout=setTimeout(()=>{cancelAnimationFrame(raf);run.reject(new Error('viewer did not finish within 10 seconds '+JSON.stringify({firstFrameMs,fullOpacityMs,decodeMs,image:document.querySelector('img.cp-image')?.outerHTML,page:Boolean(document.querySelector('.page-layer'))})));},10000);
+  function loop(){
+    const image=document.querySelector('img.cp-image:not(.cp-image-preview)');
+    if(image){
+      if(!decodeStarted){
+        decodeStarted=true; source=image.currentSrc||image.src;
+        const decoded=()=>image.decode().then(()=>{decodeMs=performance.now()-start;}).catch(error=>{clearTimeout(timeout);run.reject(error);});
+        if(image.complete&&image.naturalWidth>0)decoded();else image.addEventListener('load',decoded,{once:true});
+      }
+      const box=image.getBoundingClientRect();
+      let opacity=Number(getComputedStyle(image).opacity),visible=box.width>0&&box.height>0;
+      for(let parent=image.parentElement;parent;parent=parent.parentElement){const css=getComputedStyle(parent);opacity*=Number(css.opacity);visible&&=css.visibility!=='hidden'&&css.display!=='none';}
+      if(decodeMs!==null&&image.complete&&image.naturalWidth>0&&visible&&opacity>.01&&firstFrameMs===null){
+        const candidate=performance.now()-start; requestAnimationFrame(()=>{firstFrameMs??=candidate;});
+      }
+      if(decodeMs!==null&&image.complete&&image.naturalWidth>0&&visible&&opacity>=.99&&fullOpacityMs===null){
+        const candidate=performance.now()-start; requestAnimationFrame(()=>{fullOpacityMs??=candidate;});
+      }
+      if(firstFrameMs!==null&&fullOpacityMs!==null&&decodeMs!==null){
+        const entries=performance.getEntriesByName(source,'resource'); const resource=entries.at(-1);
+        const result={firstFrameMs,fullOpacityMs,decodeMs,width:image.naturalWidth,height:image.naturalHeight,source,
+          transferSize:resource?.transferSize??0,encodedBodySize:resource?.encodedBodySize??0,
+          responseMs:resource?resource.responseEnd-start:null};
+        clearTimeout(timeout);latest=result;run.resolve(result);return;
+      }
+    }
+    raf=requestAnimationFrame(loop);
+  }
+  raf=requestAnimationFrame(loop);
+},true);
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

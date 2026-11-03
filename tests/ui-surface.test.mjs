@@ -8,16 +8,17 @@ const read = (relativePath) => readFile(path.join(root, relativePath), "utf8");
 
 test("settings page keeps the tray-era surface connected", async () => {
   const app = await read("renderer/src/App.tsx");
+  const settingsPage = await read("renderer/src/ui/SettingsPage.tsx");
   const shell = await read("renderer/src/ui/ShellSettings.tsx");
   const settings = await read("renderer/src/ball-settings.ts");
 
   assert.match(app, /viewMode === "settings"/);
-  assert.match(app, /<PluginsSection/);
-  assert.match(app, /后台记录剪贴板/);
-  assert.match(app, /历史保留时间/);
-  assert.match(app, /已放到画布上或已分类的内容不会被自动清理/);
-  assert.match(app, /分类类别/);
-  assert.match(app, /文件路径/);
+  assert.match(settingsPage, /<PluginsSection/);
+  assert.match(settingsPage, /后台记录剪贴板/);
+  assert.match(settingsPage, /历史保留时间/);
+  assert.match(settingsPage, /已放到画布上或已分类的内容不会被自动清理/);
+  assert.match(settingsPage, /分类管理/);
+  assert.match(settingsPage, /文件路径/);
   assert.match(shell, /收纳到托盘/);
   assert.match(shell, /退出程序/);
   assert.doesNotMatch(shell, /悬浮球|"float"/);

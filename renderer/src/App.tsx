@@ -8,29 +8,24 @@ import type {
   ContentRecord,
   DesktopSettings,
   DesktopSettingsPatch,
-  GridSize,
-  HistoryRetentionDays,
   ImportViewport,
   MainNavigation,
   NewContentInput,
+  WindowResizeDirection,
 } from "../../shared/image-board";
 import { applySelection, mergeSelection } from "../../shared/canvas-selection";
-import { readCanvasAppearance, saveCanvasAppearance, type CanvasAppearance, type CanvasPattern } from "./canvas/canvas-appearance";
+import { readCanvasAppearance, saveCanvasAppearance, type CanvasAppearance } from "./canvas/canvas-appearance";
 import { CanvasStage, type CanvasStageHandle } from "./canvas/CanvasStage";
 import { contentTitle, isHttpUrl } from "./content/content-meta";
 import { HistoryDrawer } from "./history/HistoryDrawer";
 import { LibraryView } from "./library/LibraryView";
 import { ContentPage } from "./pages/ContentPage";
 import { IconArrowLeft } from "./ui/ContentIcons";
-import { PluginsSection } from "./plugins/PluginsSection";
 import { CanvasTree, ContextMenu } from "./ui/CanvasTree";
-import { ColorPicker } from "./ui/ColorPicker";
+import { CanvasDock, type CanvasTool } from "./ui/CanvasDock";
 import { ContentActions, type ContentActionContext, type PanelAnchor } from "./ui/ContentActions";
-import { DirectoryField } from "./ui/DirectoryField";
-import { Select } from "./ui/Select";
-import { ShellSettings } from "./ui/ShellSettings";
-import { ImageFileSettings } from "./ui/ImageFileSettings";
-import { IconClose, IconDots, IconFolder, IconGear, IconGrid, IconMagnet, IconMinus, IconPanelLeft, IconSearch } from "./ui/Icons";
+import { SettingsPage, SettingsNavigation, type SettingsSection } from "./ui/SettingsPage";
+import { IconClose, IconDots, IconFolder, IconGear, IconGrid, IconMinus, IconPanelLeft, IconSearch } from "./ui/Icons";
 import { ToastView, toastChannel, type ToastChannel, type ToastKind, type ToastMessage } from "./ui/Toast";
 import { usePresence } from "./ui/motion";
 import { SIDEBAR_WIDTH, drawerLayout as drawerLayoutBucket } from "./ui/breakpoints";
@@ -54,32 +49,6 @@ const SIDEBAR_PEEK_GRACE_MS = 170;
 const HISTORY_OPEN_KEY = "quick-image-board.history-open";
 const DEFAULT_PATH_SETTINGS: PathSettings = { filePath: "quick-image-board" };
 const FALLBACK_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 };
-const RETENTION_OPTIONS = [
-  { value: "7", label: "7 天" },
-  { value: "30", label: "30 天" },
-  { value: "90", label: "90 天" },
-  { value: "365", label: "1 年" },
-  { value: "0", label: "永久保留" },
-];
-const GRID_OPTIONS = [
-  { value: "16", label: "16" },
-  { value: "24", label: "24" },
-  { value: "32", label: "32" },
-];
-const PATTERN_OPTIONS: Array<{ value: CanvasPattern; label: string }> = [
-  { value: "dots", label: "网点" },
-  { value: "lines", label: "网格线" },
-  { value: "none", label: "无" },
-];
-const CANVAS_BACKGROUND_PRESETS = [
-  { hex: "#FBFBFA", label: "纸白" },
-  { hex: "#E8ECF1", label: "雾灰" },
-  { hex: "#FFFFFF", label: "纯白" },
-  { hex: "#F1EEE6", label: "米色" },
-  { hex: "#E4EAF2", label: "雾蓝" },
-  { hex: "#2A313B", label: "石墨" },
-];
-
 function readPathSettings(): PathSettings {
   try {
     const raw = window.localStorage.getItem(PATH_SETTINGS_KEY);
@@ -122,9 +91,14 @@ function App() {
   viewModeRef.current = viewMode;
   const [sidebarPinnedChoice, setSidebarPinnedChoice] = useState<boolean | null>(readSidebarPinned);
   const [sidebarPeek, setSidebarPeek] = useState(false);
+  const [settingsSidebarPinned, setSettingsSidebarPinned] = useState(true);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("canvas");
+  const [settingsQuery, setSettingsQuery] = useState("");
   const [treeQuery, setTreeQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [showControls, setShowControls] = useState(false);
+  const sidebarSearchFocusPendingRef = useRef(false);
+  const [showControls, setShowControls] = useState(true);
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
   const [pathSettings, setPathSettings] = useState<PathSettings>(() => readPathSettings());
   const [canvasAppearance, setCanvasAppearance] = useState<CanvasAppearance>(() => readCanvasAppearance(window.localStorage));
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -177,7 +151,7 @@ function App() {
   const windowLayout = useWindowLayout();
   // A saved pin choice wins at every width; only an unsaved preference falls
   // back to the wide-window default (pinned at >=1100, collapsed below).
-  const sidebarPinned = sidebarPinnedChoice ?? windowLayout.sidebar === "docked";
+  const sidebarPinned = viewMode === "settings" ? settingsSidebarPinned : sidebarPinnedChoice ?? windowLayout.sidebar === "docked";
   const sidebarVisible = sidebarPinned || sidebarPeek;
   const sidebarVisibleRef = useRef(sidebarVisible);
   sidebarVisibleRef.current = sidebarVisible;
@@ -186,6 +160,8 @@ function App() {
   const sidebarPeekRef = useRef(sidebarPeek);
   sidebarPeekRef.current = sidebarPeek;
   const sidebarPointerInsideRef = useRef(false);
+  const sidebarDraggingRef = useRef(false);
+  const sidebarMenuOriginRef = useRef<HTMLElement | null>(null);
   const peekTimerRef = useRef<number | null>(null);
   const toggleSidebarRef = useRef<() => void>(() => {});
   const workspaceMainRef = useRef<HTMLDivElement>(null);
@@ -201,21 +177,59 @@ function App() {
   const stageRef = useRef<CanvasStageHandle | null>(null);
   const titleDragRef = useRef<{ x: number; y: number; pointer: number } | null>(null);
   const titleDragBusy = useRef(false);
-  const titleDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
+  const windowStateSequence = useRef(0);
+  const titleDragMove = (event: Pick<PointerEvent, "pointerId" | "buttons" | "clientX" | "clientY">) => {
     const start = titleDragRef.current;
     if (!start || start.pointer !== event.pointerId || !(event.buttons & 1) || titleDragBusy.current) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
     titleDragRef.current = null;
     titleDragBusy.current = true;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    void window.imageBoard.startTitlebarDrag().then(() => setMaximized(false)).catch((caught) => showError(caught instanceof Error ? caught.message : "拖动窗口失败")).finally(() => { titleDragBusy.current = false; });
+    void window.imageBoard.startTitlebarDrag().then(() => refreshMaximized()).catch((caught) => showError(caught instanceof Error ? caught.message : "拖动窗口失败")).finally(() => { titleDragBusy.current = false; });
   };
+  const titleDragMoveRef = useRef(titleDragMove); titleDragMoveRef.current = titleDragMove;
   const [maximized, setMaximized] = useState(false);
   const maximizeBusy = useRef(false);
+  const refreshMaximized = useCallback(() => {
+    const sequence = ++windowStateSequence.current;
+    if (typeof window.imageBoard.isMaximized !== "function") return;
+    void window.imageBoard.isMaximized().then((value) => {
+      if (sequence === windowStateSequence.current) setMaximized(value);
+    }).catch(() => { /* A later focus/resize will retry a transient host failure. */ });
+  }, []);
+  useEffect(() => {
+    let frame: number | null = null;
+    const refresh = () => { if (frame !== null) cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { frame = null; refreshMaximized(); }); };
+    const blur = () => { titleDragRef.current = null; };
+    const move = (event: PointerEvent) => titleDragMoveRef.current(event);
+    refreshMaximized();
+    window.addEventListener("resize", refresh);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("blur", blur);
+    window.addEventListener("pointerup", blur);
+    window.addEventListener("pointercancel", blur);
+    window.addEventListener("pointermove", move);
+    return () => {
+      windowStateSequence.current += 1;
+      if (frame !== null) cancelAnimationFrame(frame);
+      window.removeEventListener("resize", refresh); window.removeEventListener("focus", refresh); window.removeEventListener("blur", blur);
+      window.removeEventListener("pointerup", blur); window.removeEventListener("pointercancel", blur); window.removeEventListener("pointermove", move);
+    };
+  }, [refreshMaximized]);
+  const startTitlebarPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || titleDragBusy.current || maximizeBusy.current) return;
+    if ((event.target as Element).closest("button, input, textarea, select, a, [contenteditable]")) return;
+    event.preventDefault();
+    titleDragRef.current = { x: event.clientX, y: event.clientY, pointer: event.pointerId };
+  };
+  const resizeWindowFromEdge = (event: React.PointerEvent, direction: WindowResizeDirection) => {
+    if (event.button !== 0 || maximized || typeof window.imageBoard.startResizeDragging !== "function") return;
+    event.preventDefault(); event.stopPropagation(); titleDragRef.current = null;
+    void window.imageBoard.startResizeDragging(direction).then(refreshMaximized).catch((caught) => showError(caught instanceof Error ? caught.message : "调整窗口大小失败"));
+  };
   const toggleMaximize = async () => {
     if (maximizeBusy.current) return;
     maximizeBusy.current = true;
-    try { setMaximized(await window.imageBoard.toggleMaximized()); }
+    try { const next = await window.imageBoard.toggleMaximized(); windowStateSequence.current += 1; setMaximized(next); }
     catch (caught) { showError(caught instanceof Error ? caught.message : "切换窗口大小失败"); }
     finally { maximizeBusy.current = false; }
   };
@@ -314,7 +328,7 @@ function App() {
     };
   }
   const selectionPresence = usePresence(selectionOpen, 140);
-  const canvasToolbarPresence = usePresence(showControls && viewMode === "canvas" && !page, 140);
+  const canvasToolbarPresence = usePresence(viewMode === "canvas" && !page, 140);
 
   // ---- single feedback outlet -------------------------------------------------
   const showToast = useCallback((kind: ToastKind, message: string) => {
@@ -447,6 +461,8 @@ function App() {
   }, []);
   const closePeek = useCallback(() => {
     cancelPeekClose();
+    sidebarMenuOriginRef.current = null;
+    sidebarSearchFocusPendingRef.current = false;
     setSidebarPeek(false);
   }, [cancelPeekClose]);
   const openPeek = useCallback(() => {
@@ -454,21 +470,63 @@ function App() {
     cancelPeekClose();
     setSidebarPeek(true);
   }, [cancelPeekClose]);
+  const focusSidebarToggle = useCallback(() => {
+    document.querySelector<HTMLButtonElement>('.sidebar-toggle')?.focus({ preventScroll: true });
+  }, []);
+  const dismissSidebar = useCallback(() => {
+    cancelPeekClose();
+    sidebarPointerInsideRef.current = false;
+    sidebarMenuOriginRef.current = null;
+    sidebarSearchFocusPendingRef.current = false;
+    setSidebarPeek(false);
+    if (viewModeRef.current === 'settings') setSettingsSidebarPinned(false);
+    else setSidebarPinnedChoice(false);
+    stageRef.current?.beginWindowAnchoredResize();
+    focusSidebarToggle();
+  }, [cancelPeekClose, focusSidebarToggle]);
   /** Keyboard focus — or a focused search field — holds the peek open. */
   const peekHeldByKeyboard = useCallback(() => {
     const active = document.activeElement;
     if (!(active instanceof HTMLElement) || !active.closest(".sidebar")) return false;
     return sidebarKeyboardInputRef.current || active === searchInputRef.current;
   }, []);
-  /** Close intent: wait out the trigger/panel gap, and never while hovering. */
+  const peekHeldByInteraction = useCallback(() => sidebarDraggingRef.current || Boolean(sidebarMenuOriginRef.current && (
+    document.querySelector('.canvas-context-menu:not([data-motion="exit"])') || dialogRef.current
+  )), []);
+  /** One grace period bridges the trigger/panel gap and protects ongoing work. */
   const schedulePeekClose = useCallback(() => {
     if (sidebarPinnedRef.current || sidebarPointerInsideRef.current) return;
     cancelPeekClose();
     peekTimerRef.current = window.setTimeout(() => {
       peekTimerRef.current = null;
-      if (!sidebarPinnedRef.current && !sidebarPointerInsideRef.current && !peekHeldByKeyboard()) setSidebarPeek(false);
+      if (!sidebarPinnedRef.current && !sidebarPointerInsideRef.current && !peekHeldByKeyboard() && !peekHeldByInteraction()) setSidebarPeek(false);
     }, SIDEBAR_PEEK_GRACE_MS);
-  }, [cancelPeekClose, peekHeldByKeyboard]);
+  }, [cancelPeekClose, peekHeldByKeyboard, peekHeldByInteraction]);
+  useEffect(() => {
+    if (!sidebarPeek) return;
+    const finishDrag = (event: DragEvent) => {
+      if (!sidebarDraggingRef.current) return;
+      sidebarDraggingRef.current = false;
+      const hit = document.elementFromPoint?.(event.clientX, event.clientY);
+      sidebarPointerInsideRef.current = Boolean(hit?.closest('.sidebar, .sidebar-toggle'));
+      schedulePeekClose();
+    };
+    const observer = new MutationObserver(() => {
+      const origin = sidebarMenuOriginRef.current;
+      if (!origin || !sidebarPeekRef.current) return;
+      if (peekHeldByInteraction()) { cancelPeekClose(); return; }
+      sidebarMenuOriginRef.current = null;
+      const active = document.activeElement;
+      if (sidebarKeyboardInputRef.current && origin.isConnected && (active === document.body || active instanceof Element && active.closest('.canvas-context-menu, .dialog-card'))) {
+        origin.tabIndex = -1; origin.focus({ preventScroll: true });
+      }
+      schedulePeekClose();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-motion'] });
+    document.addEventListener('dragend', finishDrag, true);
+    document.addEventListener('drop', finishDrag, true);
+    return () => { observer.disconnect(); document.removeEventListener('dragend', finishDrag, true); document.removeEventListener('drop', finishDrag, true); };
+  }, [cancelPeekClose, peekHeldByInteraction, schedulePeekClose, sidebarPeek]);
   useEffect(() => {
     const trackPointer = (event: PointerEvent) => {
       pointerClientRef.current = { x: event.clientX, y: event.clientY };
@@ -499,7 +557,22 @@ function App() {
     if (!content) return;
     if (sidebarVisible) content.removeAttribute("inert");
     else content.setAttribute("inert", "");
-  }, [sidebarVisible]);
+    // Fulfil shortcuts after React commits the visible, non-inert panel. This
+    // also covers shortcuts requested while the initial snapshot is loading.
+    if (!sidebarVisible || !sidebarSearchFocusPendingRef.current) return;
+    let frame: number | null = null;
+    const focusCommittedSearch = () => {
+      const input = searchInputRef.current;
+      if (!sidebarVisibleRef.current || !sidebarSearchFocusPendingRef.current || !input) return;
+      input.focus({ preventScroll: true });
+      if (document.activeElement === input) sidebarSearchFocusPendingRef.current = false;
+      // Visibility inherited through transitioning descendants may settle over
+      // several frames. Keep the request until focus succeeds or is cancelled.
+      else frame = requestAnimationFrame(focusCommittedSearch);
+    };
+    focusCommittedSearch();
+    return () => { if (frame !== null) cancelAnimationFrame(frame); };
+  }, [sidebarVisible, state !== null]);
   useEffect(() => {
     const onWindowBlur = () => {
       if (!sidebarPinnedRef.current) closePeek();
@@ -516,14 +589,14 @@ function App() {
       if (!sidebarPeekRef.current || sidebarPinnedRef.current) return;
       if (dialogRef.current || actionsRef.current || gestureBusyRef.current) return;
       if (isEditableTarget(event.target)) return;
-      if (document.querySelector('[data-esc-layer], .dialog-card, .content-actions, .canvas-context-menu')) return;
+      if (document.querySelector('[data-esc-layer]:not([data-motion="exit"]), .dialog-card:not([data-motion="exit"]), .content-actions:not([data-motion="exit"]), .canvas-context-menu:not([data-motion="exit"])')) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      closePeek();
+      closePeek(); focusSidebarToggle();
     };
     window.addEventListener("keydown", onPeekEscape, true);
     return () => window.removeEventListener("keydown", onPeekEscape, true);
-  }, [closePeek]);
+  }, [closePeek, focusSidebarToggle]);
   useEffect(() => () => {
     if (peekTimerRef.current !== null) window.clearTimeout(peekTimerRef.current);
   }, []);
@@ -545,19 +618,14 @@ function App() {
   const toggleSidebar = useCallback(() => {
     cancelPeekClose();
     if (sidebarPinnedRef.current) {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.closest(".sidebar")) active.blur();
-      setSidebarPinnedChoice(false);
-      // An explicit close dismisses the hover peek as well, even while the
-      // pointer stays on the toggle. A later pointer entry can preview again.
-      setSidebarPeek(false);
-      stageRef.current?.beginWindowAnchoredResize();
+      dismissSidebar();
     } else {
-      setSidebarPinnedChoice(true);
+      if (viewModeRef.current === 'settings') setSettingsSidebarPinned(true);
+      else setSidebarPinnedChoice(true);
       setSidebarPeek(false);
       stageRef.current?.beginWindowAnchoredResize();
     }
-  }, [cancelPeekClose]);
+  }, [cancelPeekClose, dismissSidebar]);
   toggleSidebarRef.current = toggleSidebar;
   // The floating peek has no scrim: any press outside the panel, its toggle or
   // a portalled tree menu dismisses it. A pinned sidebar never closes this way.
@@ -565,11 +633,11 @@ function App() {
     if (sidebarPinned || !sidebarPeek) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
-      if (!target?.closest(".sidebar, .sidebar-toggle, .canvas-context-menu")) closePeek();
+      if (!peekHeldByInteraction() && !target?.closest(".sidebar, .sidebar-toggle, .canvas-context-menu")) closePeek();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [closePeek, sidebarPeek, sidebarPinned]);
+  }, [closePeek, peekHeldByInteraction, sidebarPeek, sidebarPinned]);
   useEffect(() => {
     try { window.localStorage.setItem(PATH_SETTINGS_KEY, JSON.stringify(pathSettings)); } catch { /* local preference storage is optional */ }
   }, [pathSettings]);
@@ -579,8 +647,12 @@ function App() {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
       if (isEditableTarget(event.target)) return;
       event.preventDefault();
+      sidebarSearchFocusPendingRef.current = true;
       openPeek();
-      requestAnimationFrame(() => searchInputRef.current?.focus());
+      if (sidebarVisibleRef.current && searchInputRef.current) {
+        searchInputRef.current.focus({ preventScroll: true });
+        if (document.activeElement === searchInputRef.current) sidebarSearchFocusPendingRef.current = false;
+      }
     };
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
@@ -615,6 +687,11 @@ function App() {
   }, []);
 
   // ---- viewport persistence ---------------------------------------------------
+  useEffect(() => {
+    const timers = viewportTimersRef.current;
+    return () => { for (const timer of timers.values()) window.clearTimeout(timer); timers.clear(); };
+  }, []);
+
   const persistViewport = useCallback((canvasId: string, viewport: CanvasViewport) => {
     viewportCacheRef.current.set(canvasId, viewport);
     const timers = viewportTimersRef.current;
@@ -1112,9 +1189,10 @@ function App() {
     gestureBusyRef.current = false;
     pendingPushRef.current = null;
     dismissPage();
+    if (next === "settings" && viewModeRef.current !== "settings") setSettingsSidebarPinned(true);
+    setSidebarPeek(false);
     setViewMode(next);
     clearSelection();
-    setShowControls(false);
     setActions(null);
     setCardMenu(null);
     setEdgeMenu(null);
@@ -1194,7 +1272,7 @@ function App() {
         if (!isHttpUrl(url)) return;
         input = { kind: "link", url };
       } else {
-        input = { kind };
+        input = { kind: "richText" };
       }
       markBusy("正在新建节点…");
       try {
@@ -1222,11 +1300,77 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyState, markBusy, markIdle, openPage, showError, showNotice]);
 
+  /** Dock actions always use the visible board center, not the toolbar's pointer position. */
+  const dockCreateTarget = useCallback((): CreateMenuState | null => {
+    const canvasId = stateRef.current?.activeCanvasId;
+    const rect = document.querySelector<HTMLElement>(".canvas-viewport")?.getBoundingClientRect();
+    if (!canvasId || !rect || !stageRef.current) return null;
+    const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    const point = stageRef.current.worldPoint(x, y);
+    return point ? { canvasId, x, y, point } : null;
+  }, []);
+
+  const createNodeFromDock = useCallback((kind: "richText" | "link") => {
+    const target = dockCreateTarget();
+    if (!target) return;
+    setCanvasTool("select");
+    void createNodeFromMenu(kind, target);
+  }, [dockCreateTarget, createNodeFromMenu]);
+
+  /** A saved edit is a new board item, placed beside its source and revealed immediately. */
+  const finishImageSave = useCallback(async (result: { state: AppState; contentId: string }) => {
+    applyState(result.state);
+    const origin = pageRef.current?.origin;
+    const canvasId = origin?.kind === "canvas" ? origin.canvasId : result.state.activeCanvasId;
+    const canvas = result.state.canvases.find((entry) => entry.id === canvasId);
+    if (!canvas) { showError("图片副本已保存，来源画布不存在"); return; }
+    const source = canvas.nodes.find((node) => node.contentId === pageRef.current?.contentId);
+    const view = importViewport();
+    const point = source ? { x: source.x + source.width + 180, y: source.y + source.height / 2 }
+      : { x: (view.width / 2 - view.x) / view.zoom, y: (view.height / 2 - view.y) / view.zoom };
+    try {
+      const next = await window.imageBoard.placeContent(result.contentId, canvasId, point);
+      applyState(next);
+      setCanvasTool("select");
+      revealRef.current = { canvasId, contentId: result.contentId };
+      pageActionRef.current = { canvasId };
+      pageOriginElementRef.current = null;
+      setPageOpen(false);
+      showNotice("编辑后的图片已放到画布，原图保留");
+    } catch (caught) {
+      openPage(result.contentId, origin ?? { kind: "canvas", canvasId });
+      showError(caught instanceof Error ? `副本已保存，放到画布失败：${caught.message}` : "副本已保存，放到画布失败，可从历史拖入");
+    }
+  }, [applyState, importViewport, openPage, showError, showNotice]);
+
+  const importImageToCanvas = useCallback(async () => {
+    if (busyRef.current || createNodeBusyRef.current) return;
+    const target = dockCreateTarget();
+    if (!target) return;
+    createNodeBusyRef.current = true;
+    try {
+      const result = await window.imageBoard.openImageFile();
+      if (!result) return;
+      applyState(result.state);
+      markBusy("正在导入图片…");
+      const next = await window.imageBoard.placeContent(result.contentId, target.canvasId, target.point);
+      applyState(next);
+      setCanvasTool("select");
+      const node = next.canvases.find((entry) => entry.id === target.canvasId)?.nodes.find((entry) => entry.contentId === result.contentId);
+      if (node) {
+        selectedNodeIdsRef.current = [node.id];
+        setSelectedNodeIds([node.id]); setSelectedCardId(null); setSelectedEdgeIds([]);
+        setFocusRequest({ nodeId: node.id, nonce: ++focusNonceRef.current });
+      }
+      showNotice("图片已放到画布");
+    } catch (caught) { showError(caught instanceof Error ? caught.message : "图片导入失败"); }
+    finally { createNodeBusyRef.current = false; markIdle(); }
+  }, [applyState, dockCreateTarget, markBusy, markIdle, showError, showNotice]);
+
   const buildCreateMenu = (target: CreateMenuState) => ({
     x: target.x,
     y: target.y,
     items: [
-      { label: "新建文本节点", onSelect: () => void createNodeFromMenu("text", target) },
       { label: "新建链接节点", onSelect: () => void createNodeFromMenu("link", target) },
       { label: "新建富文本节点", onSelect: () => void createNodeFromMenu("richText", target) },
     ],
@@ -1392,17 +1536,29 @@ function App() {
 
   if (!state) return <div className="loading-card">{loadError ? <><strong>本地内容画布打开失败</strong><span>{loadError}</span><div className="loading-actions"><button className="primary-button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>重试</button><button onClick={() => void window.imageBoard.closeWindow()}>退出</button></div></> : "正在打开本地内容画布…"}</div>;
 
+  const sidebarActions = (
+    <div className="sidebar-heading-actions">
+          {!sidebarPinned && <button type="button" className="sidebar-pin" aria-label="固定侧边栏" title="固定侧边栏" onClick={toggleSidebar}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 3 6 6-4 1-4 4 1 4-3 1-6-6 1-3 4 1 4-4 1-4ZM8 16l-5 5" /></svg>固定</button>}
+          <button type="button" className="sidebar-collapse" aria-label="收起侧边栏" title="收起侧边栏" onClick={dismissSidebar}><IconPanelLeft size={15} /></button>
+        </div>
+  );
   const sidebarInner = (
     <>
+      {viewMode === "settings" && <div className="sidebar-heading">
+        <button type="button" className="sidebar-back" aria-label="返回画布" title="返回画布" onClick={() => void switchView("canvas")}><IconArrowLeft size={15} /></button>
+        <strong>设置</strong>
+        {sidebarActions}
+      </div>}
       <div className="sidebar-search">
         <IconSearch size={14} />
-        <input ref={searchInputRef} value={treeQuery} placeholder="搜索画布…" aria-label="搜索画布" onChange={(event) => setTreeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setTreeQuery(""); event.currentTarget.blur(); if (!sidebarPinnedRef.current) closePeek(); } }} />
-        {treeQuery === "" && <kbd>Ctrl K</kbd>}
+        <input ref={searchInputRef} value={viewMode === "settings" ? settingsQuery : treeQuery} placeholder={viewMode === "settings" ? "搜索设置…" : "搜索画布…"} aria-label={viewMode === "settings" ? "搜索设置" : "搜索画布"} onChange={(event) => (viewMode === "settings" ? setSettingsQuery : setTreeQuery)(event.target.value)} onKeyDown={(event) => { if (event.key !== "Escape" || event.nativeEvent.isComposing) return; event.preventDefault(); event.stopPropagation(); if (viewMode === "settings" ? settingsQuery : treeQuery) { (viewMode === "settings" ? setSettingsQuery : setTreeQuery)(""); return; } if (!sidebarPinnedRef.current) dismissSidebar(); else event.currentTarget.blur(); }} />
+        {(sidebarPinned || viewMode === "settings") && (viewMode === "settings" ? settingsQuery : treeQuery) === "" && <kbd>Ctrl K</kbd>}
+        {viewMode !== "settings" && !sidebarPinned && sidebarActions}
       </div>
-      <nav className="sidebar-nav">
+      {viewMode === "settings" ? <SettingsNavigation section={settingsSection} onSectionChange={(section) => { setSettingsSection(section); cancelPeekClose(); }} query={settingsQuery} /> : <nav className="sidebar-nav" aria-label="工作区导航">
         <button className={viewMode === "canvas" ? "active" : undefined} onClick={() => switchView("canvas")}><IconGrid size={15} />画布</button>
         <button className={viewMode === "library" ? "active" : undefined} onClick={() => switchView("library")}><IconFolder size={15} />分类库</button>
-      </nav>
+      </nav>}
       {viewMode === "canvas" && <CanvasTree canvases={state.canvases} activeCanvasId={state.activeCanvasId} query={treeQuery} onEnter={(canvasId) => void changeCanvas(canvasId)} onCreateRoot={() => { clearSelection(); void update(() => window.imageBoard.createCanvas()); }} onCreateChild={(parentId) => { clearSelection(); void update(() => window.imageBoard.createCanvas(parentId)); }} onRename={(canvasId) => void renameCanvasById(canvasId)} onDelete={(canvasId) => void deleteCanvas(canvasId)} onUngroup={ungroupCanvasById} onMove={moveCanvasNode} />}
       <footer className="sidebar-footer">
         <div className="footer-avatar"><AppLogo size={20} /></div>
@@ -1414,30 +1570,6 @@ function App() {
 
   const canvasView = activeCanvas ? (
     <>
-      {canvasToolbarPresence.mounted && (
-        <div className="canvas-controls motion-slide-down" data-motion={canvasToolbarPresence.phase}>
-          <div className="canvas-toolbar">
-            <span className="toolbar-label">{activeCanvas.name}</span>
-            <span className="toolbar-hint">单击选中 · Shift 多选 · 双击打开 · 空白拖框选 · 中键/Space 平移 · 从节点边缘拖出连线</span>
-            <div className="zoom-controls">
-              <button
-                className={`grid-toggle${snapToGrid ? " active" : ""}`}
-                title="网格对齐（按住 Alt 临时切换对齐模式）"
-                aria-label="网格对齐"
-                aria-pressed={snapToGrid}
-                onClick={toggleSnap}
-              >
-                <IconMagnet size={14} />网格对齐
-              </button>
-              <button title="缩小" aria-label="缩小" onClick={() => stageRef.current?.zoomBy(-0.1)}>−</button>
-              <span>{Math.round(zoomDisplay * 100)}%</span>
-              <button title="放大" aria-label="放大" onClick={() => stageRef.current?.zoomBy(0.1)}>＋</button>
-              <button className="locate-button" title="定位全部节点" onClick={() => { if (!stageRef.current?.locateAll()) showInfo("当前画布还没有节点"); }}>定位全部</button>
-              <button className="locate-button" title={historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} onClick={() => setHistoryOpen((open) => !open)}>{historyOpen ? "收起历史" : "历史"}</button>
-            </div>
-          </div>
-        </div>
-      )}
       <CanvasStage
         key={activeCanvas.id}
         ref={stageRef}
@@ -1447,6 +1579,7 @@ function App() {
         initialViewport={viewportCacheRef.current.get(activeCanvas.id) ?? activeCanvas.viewport}
         busy={busy}
         snapToGrid={snapToGrid}
+        interactionMode={canvasTool}
         gridSize={desktopSettings?.gridSize ?? 24}
         appearance={canvasAppearance}
         spawnFrom={spawnFrom}
@@ -1473,18 +1606,31 @@ function App() {
         onZoomChange={setZoomDisplay}
         onInteractionChange={handleInteractionChange}
       />
+      {canvasToolbarPresence.mounted && <div className={`canvas-dock-motion motion-fade${drawerLayout === "overlay" && historyOpen ? " has-overlay-history" : ""}`} data-motion={canvasToolbarPresence.phase}>
+        <CanvasDock tool={canvasTool} onToolChange={setCanvasTool} onCreate={createNodeFromDock} onImportImage={() => void importImageToCanvas()}
+          onCreateCanvas={() => { clearSelection(); void update(() => window.imageBoard.createCanvas(activeCanvas.id)); }}
+          historyOpen={historyOpen} onToggleHistory={() => setHistoryOpen((open) => !open)}
+          snapToGrid={snapToGrid} onToggleSnap={toggleSnap} zoom={zoomDisplay} onZoom={(delta) => stageRef.current?.zoomBy(delta)}
+          onLocateAll={() => { if (!stageRef.current?.locateAll()) showInfo("当前画布还没有节点"); }}
+          showViewControls={showControls} disabled={busy} />
+      </div>}
     </>
   ) : (
     <div className="empty-canvas"><strong>画布不存在</strong><span>请在左侧选择或新建画布</span></div>
   );
 
-  return <main ref={appShellRef} className={`app-shell${maximized ? " is-maximized" : ""}`}>
+  return <main ref={appShellRef} className={`app-shell${maximized ? " is-maximized" : ""}${viewMode === "canvas" ? " is-canvas-workspace" : ""}${page ? " has-content-page" : ""}`}>
+    {!maximized && <div className="window-resize-handles" aria-hidden="true">
+      {(["North", "NorthEast", "East", "SouthEast", "South", "SouthWest", "West", "NorthWest"] as WindowResizeDirection[]).map((direction) => <div key={direction} className={`window-resize-edge resize-${direction}`} data-resize-direction={direction} onPointerDown={(event) => resizeWindowFromEdge(event, direction)} />)}
+    </div>}
     <header className="topbar">
+      <div className="topbar-start">
       <button
         type="button"
         className={`icon-button no-drag sidebar-toggle${sidebarPinned ? " active" : ""}`}
         title={sidebarPinned ? "收起侧边栏 (Ctrl+Shift+S)" : "固定侧边栏 (Ctrl+Shift+S)"}
         aria-label={sidebarPinned ? "收起侧边栏 (Ctrl+Shift+S)" : "固定侧边栏 (Ctrl+Shift+S)"}
+        aria-controls="workspace-sidebar"
         aria-pressed={sidebarPinned}
         aria-expanded={sidebarVisible}
         onClick={toggleSidebar}
@@ -1494,7 +1640,7 @@ function App() {
       >
         <IconPanelLeft size={16} />
       </button>
-      <div className="window-drag-region" onDoubleClick={toggleMaximize} onPointerDown={(event) => { if (event.button !== 0) return; titleDragRef.current = { x: event.clientX, y: event.clientY, pointer: event.pointerId }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={titleDragMove} onPointerUp={() => { titleDragRef.current = null; }} onPointerCancel={() => { titleDragRef.current = null; }} onLostPointerCapture={() => { titleDragRef.current = null; }}>
+      <div className="window-drag-region" onDoubleClick={(event) => { if (!(event.target as Element).closest("button, input, a")) void toggleMaximize(); }} onPointerDown={startTitlebarPointer} onPointerMove={titleDragMove} onPointerUp={() => { titleDragRef.current = null; }} onPointerCancel={() => { titleDragRef.current = null; }} onLostPointerCapture={() => { titleDragRef.current = null; }}>
         <div className="brand-mark"><AppLogo size={26} /></div>
         {page && pagePresence.mounted ? (
           <div className="brand-copy page-crumbs motion-slide-down" data-motion={pagePresence.phase}>
@@ -1549,29 +1695,9 @@ function App() {
           </div>
         )}
       </div>
+      </div>
       <div className="topbar-actions">
-        <button type="button" className="icon-button no-drag" aria-label="打开图片" title="打开图片" onClick={() => void window.imageBoard.openImageFile().then(async (result) => { if (!result || await pageNavigationGuardRef.current?.() === false) return; applyState(result.state); openPage(result.contentId, { kind: "canvas", canvasId: result.state.activeCanvasId }); }).catch((error) => showError(error instanceof Error ? error.message : "图片打开失败"))}><IconFolder size={15} /></button>
-        <button className={viewMode === "canvas" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("canvas")}>画布</button>
-        <button className={viewMode === "library" ? "topbar-tab active" : "topbar-tab"} onClick={() => switchView("library")}>分类库</button>
-        {windowLayout.topbar === "compact" ? (viewMode === "canvas" && !page && (
-          <button
-            className="icon-button no-drag topbar-more"
-            aria-label="更多操作"
-            aria-haspopup="menu"
-            aria-expanded={topbarMenu !== null}
-            title="更多操作"
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              setCreateMenu(null);
-              setTopbarMenu({ x: rect.left, y: rect.bottom + 6 });
-            }}
-          ><IconDots size={16} /></button>
-        )) : (
-          <>
-            {viewMode === "canvas" && !page && <button className={`icon-button no-drag history-button ${historyOpen ? "active" : ""}`} aria-label={historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} title={historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} aria-pressed={historyOpen} onClick={() => setHistoryOpen((open) => !open)}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="8" cy="8" r="6" /><path d="M8 4.6V8l2.4 1.6" /></svg></button>}
-            {viewMode === "canvas" && !page && <button className={`icon-button no-drag tool-toggle ${showControls ? "active" : ""}`} aria-label={showControls ? "收起画布工具" : "展开画布工具"} title={showControls ? "收起画布工具" : "展开画布工具"} onClick={() => setShowControls((visible) => !visible)}><IconDots size={16} /></button>}
-          </>
-        )}
+
         <button className="icon-button no-drag" aria-label={maximized ? "还原小窗" : "最大化窗口"} title={maximized ? "还原小窗" : "最大化窗口"} onClick={() => void toggleMaximize()}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">{maximized ? <><path d="M5 5V2h9v9h-3" /><rect x="2" y="5" width="9" height="9" rx="1" /></> : <rect x="2.5" y="2.5" width="11" height="11" rx="1" />}</svg></button>
         <button className="icon-button no-drag" aria-label="最小化窗口" title="最小化窗口" onClick={() => void window.imageBoard.minimizeWindow()}><IconMinus size={15} /></button>
         <button className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button>
@@ -1581,12 +1707,14 @@ function App() {
     <div ref={setWorkspaceToolbarHost} className="workspace-toolbar-host" />
     <div className="workspace">
       <aside
-        className={`sidebar${sidebarPinned ? " is-pinned" : sidebarPeek ? " is-peeking" : " closed"}`}
+        id="workspace-sidebar" aria-label="工作区侧边栏" className={`sidebar${sidebarPinned ? " is-pinned" : sidebarPeek ? " is-peeking" : " closed"}`}
         aria-hidden={sidebarVisible ? undefined : true}
+        onContextMenuCapture={(event) => { if (!sidebarPeekRef.current) return; sidebarMenuOriginRef.current = (event.target as Element).closest<HTMLElement>(".tree-node"); cancelPeekClose(); }}
+        onDragStartCapture={() => { if (!sidebarPeekRef.current) return; sidebarDraggingRef.current = true; cancelPeekClose(); }}
         onPointerEnter={() => {
           sidebarPointerInsideRef.current = true;
           cancelPeekClose();
-          if (!sidebarPinnedRef.current) setSidebarPeek(true);
+          // Entering a closing panel must never reopen an explicit dismissal.
         }}
         onPointerLeave={() => {
           sidebarPointerInsideRef.current = false;
@@ -1603,10 +1731,10 @@ function App() {
           schedulePeekClose();
         }}
       >
-        <div ref={sidebarContentRef} className="sidebar-content">{sidebarInner}</div>
+        <div ref={attachSidebarContent} className="sidebar-content">{sidebarInner}</div>
       </aside>
       <div ref={workspaceMainRef} className="workspace-main">
-        <div ref={workspaceViewRef} className="workspace-view" aria-hidden={page ? true : undefined}>
+        <div ref={workspaceViewRef} className={`workspace-view${drawerLayout === "overlay" && historyOpen ? " has-history-overlay" : ""}`} aria-hidden={page ? true : undefined}>
           {viewMode === "canvas" ? canvasView
             : viewMode === "library" ? (
               <LibraryView
@@ -1620,6 +1748,7 @@ function App() {
               />
             ) : (
               <SettingsPage
+                section={settingsSection}
                 state={state}
                 pathSettings={pathSettings}
                 desktopSettings={desktopSettings}
@@ -1669,6 +1798,7 @@ function App() {
               toolbarHost={workspaceToolbarHost}
               navigationGuardRef={pageNavigationGuardRef}
               onOpenContent={(contentId) => openPage(contentId, page.origin)}
+              onImageSaved={finishImageSave}
               onState={applyState}
               onClose={closePage}
               onCopy={(ids) => void copyContents(ids)}
@@ -1743,100 +1873,6 @@ function App() {
     <ToastView toast={toast} onClose={clearToast} />
     {dialogPresence.mounted && shownDialog && <Dialog dialog={shownDialog} motion={dialogPresence.phase} onClose={clearDialog} />}
   </main>;
-}
-
-function SettingsPage({ state, pathSettings, desktopSettings, canvasAppearance, onPathSettingsChange, onCanvasAppearanceChange, onAddCategory, onDesktopSettingsChange }: {
-  state: AppState;
-  pathSettings: PathSettings;
-  desktopSettings: DesktopSettings | null;
-  canvasAppearance: CanvasAppearance;
-  onPathSettingsChange: (patch: Partial<PathSettings>) => void;
-  onCanvasAppearanceChange: (patch: Partial<CanvasAppearance>) => void;
-  onAddCategory: () => Promise<boolean>;
-  onDesktopSettingsChange: (patch: DesktopSettingsPatch) => void;
-}) {
-  return <section className="settings-view">
-    <div className="settings-heading">
-      <div><h1>设置</h1><p>画布、剪贴板偏好与窗口行为都集中在这里，改动即时生效。</p></div>
-    </div>
-    <section className="settings-section">
-      <div className="settings-section-heading"><div><strong>画布</strong><span>背景图案、网格与对齐方式。</span></div></div>
-      <div className="settings-row">
-        <div className="settings-field">
-          <label>图案</label>
-          <div className="pattern-options" role="group" aria-label="画布图案">
-            {PATTERN_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={canvasAppearance.pattern === option.value ? "active" : undefined}
-                aria-pressed={canvasAppearance.pattern === option.value}
-                onClick={() => onCanvasAppearanceChange({ pattern: option.value })}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <Select value={String(desktopSettings?.gridSize ?? 24)} label="网格间距" disabled={!desktopSettings} options={GRID_OPTIONS} onChange={(value) => onDesktopSettingsChange({ gridSize: Number(value) as GridSize })} />
-      </div>
-      <div className="settings-row">
-        <div className="settings-field settings-field-wide">
-          <label>背景颜色</label>
-          <div className="color-options">
-            {CANVAS_BACKGROUND_PRESETS.map((preset) => (
-              <button
-                key={preset.hex}
-                type="button"
-                className={`color-swatch ${canvasAppearance.background.toUpperCase() === preset.hex ? "selected" : ""}`}
-                style={{ backgroundColor: preset.hex }}
-                title={preset.label}
-                aria-label={`背景${preset.label}`}
-                aria-pressed={canvasAppearance.background.toUpperCase() === preset.hex}
-                onClick={() => onCanvasAppearanceChange({ background: preset.hex })}
-              />
-            ))}
-          </div>
-        </div>
-        <ColorPicker value={canvasAppearance.background} label="背景颜色" onChange={(hex) => onCanvasAppearanceChange({ background: hex })} />
-      </div>
-      <div className="settings-row">
-        <ColorPicker value={canvasAppearance.patternColor} label="图案颜色" onChange={(hex) => onCanvasAppearanceChange({ patternColor: hex })} />
-        <label className="range-field"><span><b>图案浓度</b><output>{Math.round(canvasAppearance.patternOpacity * 100)}%</output></span><input type="range" min="0" max="0.6" step="0.02" value={canvasAppearance.patternOpacity} onChange={(event) => onCanvasAppearanceChange({ patternOpacity: Number(event.target.value) })} /></label>
-      </div>
-      <label className="settings-toggle">
-        <input type="checkbox" checked={desktopSettings?.snapToGrid ?? false} disabled={!desktopSettings} onChange={(event) => onDesktopSettingsChange({ snapToGrid: event.target.checked })} />
-        <span><b>网格对齐</b><small>开启后拖动与放置会吸附到网格；按住 Alt 可临时切换。</small></span>
-      </label>
-      <p className="settings-note">背景颜色与图案只保存在本机；未手动选择背景时，画布使用默认的浅色底。网格间距与对齐用于画布操作。</p>
-    </section>
-    <section className="settings-section">
-      <div className="settings-section-heading"><div><strong>剪贴板</strong><span>后台记录与历史保留策略。</span></div></div>
-      <label className="settings-toggle">
-        <input type="checkbox" checked={desktopSettings ? desktopSettings.captureEnabled !== false : true} disabled={!desktopSettings} onChange={(event) => onDesktopSettingsChange({ captureEnabled: event.target.checked })} />
-        <span><b>后台记录剪贴板</b><small>复制的文字、富文本、链接和图片会进入历史；暂停后不再新增。</small></span>
-      </label>
-      <div className="settings-row">
-        <Select value={String(desktopSettings?.historyRetentionDays ?? 30)} label="历史保留时间" disabled={!desktopSettings} options={RETENTION_OPTIONS} onChange={(value) => onDesktopSettingsChange({ historyRetentionDays: Number(value) as HistoryRetentionDays })} />
-      </div>
-      <p className="settings-note">已放到画布上或已分类的内容不会被自动清理。</p>
-    </section>
-    <section className="settings-section">
-      <div className="settings-section-heading"><div><strong>目录偏好</strong><span>只保存路径偏好，不会自动搬运或删除已有内容。</span></div></div>
-      <div className="path-fields"><DirectoryField label="文件路径" value={pathSettings.filePath} onChange={(value) => onPathSettingsChange({ filePath: value })} /></div>
-      <p className="settings-note">路径变更不会在当前版本执行迁移；现有数据仍由应用的本地存储目录保护。</p>
-    </section>
-    <section className="settings-section">
-      <div className="settings-section-heading"><div><strong>窗口与启动</strong><span>关闭行为与开机自启动。</span></div></div>
-      <ShellSettings />
-    </section>
-    <ImageFileSettings />
-    <section className="settings-section">
-      <div className="settings-section-heading"><div><strong>分类类别</strong><span>分类会直接写入当前本地内容库。</span></div><button className="primary-button small-button" onClick={() => void onAddCategory()}>＋ 新建分类</button></div>
-      <div className="category-list">{state.categories.map((category) => <span className="category-chip" key={category.id}>{category.name}</span>)}</div>
-    </section>
-    <PluginsSection />
-  </section>;
 }
 
 function Dialog({ dialog, motion, onClose }: { dialog: DialogState; motion: "enter" | "idle" | "exit"; onClose: () => void }) {

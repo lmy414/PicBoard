@@ -4,6 +4,9 @@ import App from "./App";
 import TrayPanel from "./tray/TrayPanel";
 import { bootstrapImageBoard, reportReady } from "./platform/bootstrap";
 import "./styles.css";
+import { initializeTheme } from "./ui/theme";
+
+initializeTheme();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("找不到应用挂载节点");

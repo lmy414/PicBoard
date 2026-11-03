@@ -16,7 +16,7 @@ import type {
 const ISO = "2026-01-01T00:00:00.000Z";
 const VIEWPORT_RECT = { left: 100, top: 50, width: 800, height: 600 };
 const VIEWPORT: CanvasViewport = { x: -200, y: -100, zoom: 2 };
-const CREATE_LABELS = ["新建文本节点", "新建链接节点", "新建富文本节点"];
+const CREATE_LABELS = ["新建链接节点", "新建富文本节点"];
 
 function content(id: string, kind: ContentRecord["kind"], overrides: Partial<ContentRecord> = {}): ContentRecord {
   return {
@@ -198,12 +198,13 @@ async function openCreateMenu(viewport: HTMLElement) {
   return screen.findByRole("menu");
 }
 
-test("blank right click and Shift+A open the same three-item menu, focused on its first item", async () => {
+test("blank right click and Shift+A open the same two-item menu without the legacy plain-text option, focused on its first item", async () => {
   const viewport = await renderCanvas();
 
   const pointerMenu = await openCreateMenu(viewport);
   const pointerItems = within(pointerMenu).getAllByRole("menuitem");
   expect(pointerItems.map((item) => item.textContent)).toEqual(CREATE_LABELS);
+  expect(within(pointerMenu).queryByRole("menuitem", { name: "新建文本节点" })).toBeNull();
   expect(document.activeElement).toBe(pointerItems[0]);
 
   fireEvent.keyDown(document, { key: "Escape" });
@@ -212,6 +213,7 @@ test("blank right click and Shift+A open the same three-item menu, focused on it
   fireEvent.keyDown(document, { key: "a", shiftKey: true });
   const keyboardMenu = await screen.findByRole("menu");
   expect(within(keyboardMenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(CREATE_LABELS);
+  expect(within(keyboardMenu).queryByRole("menuitem", { name: "新建文本节点" })).toBeNull();
 });
 
 test("arrow keys move the menu focus, wrap, and Enter activates the focused item", async () => {
@@ -221,12 +223,13 @@ test("arrow keys move the menu focus, wrap, and Enter activates the focused item
   expect(document.activeElement).toBe(items[0]);
 
   fireEvent.keyDown(document, { key: "ArrowUp" });
-  expect(document.activeElement).toBe(items[2]);
+  expect(document.activeElement).toBe(items[1]);
   fireEvent.keyDown(document, { key: "ArrowDown" });
   expect(document.activeElement).toBe(items[0]);
   fireEvent.keyDown(document, { key: "ArrowDown" });
   expect(document.activeElement).toBe(items[1]);
 
+  fireEvent.keyDown(document, { key: "ArrowUp" });
   fireEvent.keyDown(document.activeElement!, { key: "Enter" });
   const dialog = await screen.findByRole("alertdialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
@@ -235,7 +238,6 @@ test("arrow keys move the menu focus, wrap, and Enter activates the focused item
 });
 
 test.each([
-  ["新建文本节点", "text", ".cp-page-text"],
   ["新建富文本节点", "richText", ".cp-page-richText"],
 ] as const)("choosing %s creates that kind at the mapped point and opens its page", async (label, kind, pageSelector) => {
   const state = makeState();
@@ -260,8 +262,8 @@ test("the world point follows the canvas pan and zoom", async () => {
   mockCreate(state);
 
   await openCreateMenu(viewport);
-  fireEvent.click(screen.getByRole("menuitem", { name: "新建文本节点" }));
-  await waitFor(() => expect(host.createContentNode).toHaveBeenCalledWith("root", { x: 560, y: 520 }, { kind: "text" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "新建富文本节点" }));
+  await waitFor(() => expect(host.createContentNode).toHaveBeenCalledWith("root", { x: 560, y: 520 }, { kind: "richText" }));
 });
 
 test("Shift+A uses the pointer while it is inside the canvas", async () => {
@@ -272,8 +274,8 @@ test("Shift+A uses the pointer while it is inside the canvas", async () => {
   fireEvent.pointerMove(document.body, { clientX: 700, clientY: 400 });
   fireEvent.keyDown(document, { key: "a", shiftKey: true });
   await screen.findByRole("menu");
-  fireEvent.click(screen.getByRole("menuitem", { name: "新建文本节点" }));
-  await waitFor(() => expect(host.createContentNode).toHaveBeenCalledWith("root", { x: 400, y: 225 }, { kind: "text" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "新建富文本节点" }));
+  await waitFor(() => expect(host.createContentNode).toHaveBeenCalledWith("root", { x: 400, y: 225 }, { kind: "richText" }));
 });
 
 test("Shift+A falls back to the viewport center when the pointer is outside it", async () => {
@@ -414,9 +416,21 @@ test("cancelling the link prompt and a rejected create leave no page or node beh
 
   host.createContentNode.mockRejectedValueOnce(new Error("磁盘已满"));
   await openCreateMenu(viewport);
-  fireEvent.click(screen.getByRole("menuitem", { name: "新建文本节点" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "新建富文本节点" }));
   expect(await screen.findByText("磁盘已满")).toBeTruthy();
   await waitFor(() => expect(document.querySelector(".busy-chip")).toBeNull());
   expect(document.querySelector(".page-layer")).toBeNull();
-  expect(document.querySelector('[data-node-id="node-text"]')).toBeNull();
+  expect(document.querySelector('[data-node-id="node-rich"]')).toBeNull();
+});
+
+
+test("the bottom dock creates a rich-text node at the board center with no plain-text action", async () => {
+  const state = makeState();
+  await renderCanvas(state);
+  mockCreate(state);
+  const dock = screen.getByRole("toolbar", { name: "画板工具" });
+  expect(within(dock).queryByRole("button", { name: "新建文本节点" })).toBeNull();
+  fireEvent.click(within(dock).getByRole("button", { name: "新建富文本节点" }));
+  await waitFor(() => expect(host.createContentNode).toHaveBeenCalledWith("root", { x: 300, y: 200 }, { kind: "richText" }));
+  await waitFor(() => expect(document.querySelector(".page-layer .cp-page-richText")).toBeTruthy());
 });

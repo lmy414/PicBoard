@@ -618,3 +618,12 @@ pub fn is_maximized(window: State<'_, WindowController>) -> bool {
 pub fn start_titlebar_drag(window: State<'_, WindowController>) -> Result<(), AppError> {
     window.start_titlebar_drag()
 }
+
+/// The main window's explicit edge/corner hot zones hand off to native sizing.
+#[tauri::command]
+pub fn start_resize_dragging(
+    window: State<'_, WindowController>,
+    direction: String,
+) -> Result<(), AppError> {
+    window.start_resize_dragging(&direction)
+}

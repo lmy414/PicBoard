@@ -48,6 +48,8 @@ export interface CanvasStageProps {
   contents: Record<string, ContentRecord>;
   initialViewport: CanvasViewport;
   busy: boolean;
+  /** Left-button tool; middle-button and Space panning work in either mode. */
+  interactionMode?: "select" | "pan";
   snapToGrid: boolean;
   gridSize: GridSize;
   appearance: CanvasAppearance;
@@ -191,6 +193,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const [offset, setOffset] = useState({ x: initial.x, y: initial.y });
   const [zoom, setZoom] = useState(initial.zoom);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const interactionMode = props.interactionMode ?? "select";
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [canvasWide, setCanvasWide] = useState(true);
 
@@ -198,6 +202,9 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const zoomRef = useRef(zoom);
   const spaceRef = useRef(false);
   const panRef = useRef<PanSession | null>(null);
+  // A Space release or tool switch can precede the browser's trailing click.
+  const suppressPanClickRef = useRef(false);
+  const previousModeRef = useRef(interactionMode);
   const selectRef = useRef<SelectSession | null>(null);
   const nodeDragRef = useRef<NodeDragSession | null>(null);
   const cardDragRef = useRef<CardDragSession | null>(null);
@@ -499,29 +506,113 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     };
   }, [beginGlide, stopGlide, syncBusy]);
 
-  useEffect(() => {
-    const down = (event: KeyboardEvent) => {
-      if (event.code !== "Space" || isEditable(event.target)) return;
-      spaceRef.current = true;
-      setSpacePressed(true);
+  /** Keep navigation where it stopped, but abandon any unfinished content edits. */
+  const cancelGestures = useCallback((): boolean => {
+    const pan = panRef.current;
+    const select = selectRef.current;
+    const node = nodeDragRef.current;
+    const card = cardDragRef.current;
+    const connect = connectRef.current;
+    if (!pan && !select && !node && !card && !connect) return false;
+    panRef.current = null;
+    selectRef.current = null;
+    nodeDragRef.current = null;
+    cardDragRef.current = null;
+    connectRef.current = null;
+    const release = (element: Element | null | undefined, pointerId: number) => {
+      if (element?.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
     };
-    const up = (event: KeyboardEvent) => {
-      if (event.code !== "Space") return;
+    setPanning(false);
+    setSelectionRect(null);
+    if (pan) {
+      release(viewportRef.current, pan.pointerId);
+      commitViewport(offsetRef.current, zoomRef.current);
+    }
+    if (select) release(viewportRef.current, select.pointerId);
+    if (node) {
+      if (node.cardId) cardElements.current.get(node.cardId)?.classList.remove("card-hover");
+      for (const item of node.moving) {
+        const element = nodeElements.current.get(item.id);
+        if (!element) continue;
+        element.classList.remove("dragging", "snap-drag");
+        element.style.translate = "";
+      }
+      release(nodeElements.current.get(node.nodeId), node.pointerId);
+    }
+    if (card) {
+      const element = cardElements.current.get(card.canvasId);
+      if (element) {
+        element.classList.remove("dragging", "snap-drag");
+        element.style.translate = "";
+      }
+      release(element, card.pointerId);
+    }
+    if (node || card) edgeLayerRef.current?.endDrag();
+    if (connect) {
+      connect.cleanup();
+      release(connect.element, connect.pointerId);
+      if (connect.targetId) nodeElements.current.get(connect.targetId)?.classList.remove("connect-target");
+      connectPathRef.current?.classList.remove("active");
+      connectPathRef.current?.removeAttribute("d");
+    }
+    syncBusy();
+    return true;
+  }, [commitViewport, syncBusy]);
+
+  useLayoutEffect(() => {
+    if (previousModeRef.current === interactionMode) return;
+    previousModeRef.current = interactionMode;
+    cancelGestures();
+  }, [interactionMode, cancelGestures]);
+
+  useEffect(() => {
+    const clearSpace = () => {
       spaceRef.current = false;
       setSpacePressed(false);
     };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+    const down = (event: KeyboardEvent) => {
+      if (isEditable(event.target)) return;
+      if (event.key === "Escape") {
+        if (cancelGestures()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (event.code !== "Space" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+      spaceRef.current = true;
+      setSpacePressed(true);
+      // Do not scroll the page when Space is used on a focused canvas item.
+      if (event.target instanceof Node && viewportRef.current?.contains(event.target)) event.preventDefault();
     };
-  }, []);
+    const up = (event: KeyboardEvent) => {
+      if (event.code === "Space") clearSpace();
+    };
+    const blur = () => {
+      clearSpace();
+      cancelGestures();
+    };
+    const visibility = () => {
+      if (document.visibilityState === "hidden") blur();
+    };
+    window.addEventListener("keydown", down, true);
+    window.addEventListener("keyup", up, true);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.removeEventListener("keydown", down, true);
+      window.removeEventListener("keyup", up, true);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [cancelGestures]);
 
   // An unmount can interrupt a drag or a relocation glide; drop both. Exit
   // timers are intentionally left to fire so an awaited host mutation is never
   // lost when the canvas switches mid-exit.
   useEffect(() => () => {
+    panRef.current = null;
+    selectRef.current = null;
     nodeDragRef.current = null;
     cardDragRef.current = null;
     const connect = connectRef.current;
@@ -529,7 +620,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     connect?.cleanup();
     if (flipRafRef.current !== null) cancelAnimationFrame(flipRafRef.current);
     flipRafRef.current = null;
-  }, []);
+    syncBusy();
+  }, [syncBusy]);
 
   // Viewport resizes: keep the world point under the viewport center stable
   // (imperative offset adjustment), sync React once per resize burst, and flip
@@ -584,10 +676,13 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.focusRequest]);
 
+  const handToolActive = () => propsRef.current.interactionMode === "pan" || spaceRef.current;
+  const panPointer = (event: React.PointerEvent<HTMLElement>) => event.button === 1 || (event.button === 0 && handToolActive());
+
   // ---- node gestures ---------------------------------------------------------
   const nodePointerDown = (event: React.PointerEvent<HTMLElement>, node: CanvasNode) => {
     if (propsRef.current.busy) return;
-    if (event.button === 1 || (event.button === 0 && spaceRef.current)) return;
+    if (panPointer(event) || isEditable(event.target)) return;
     if (event.button !== 0 || nodeDragRef.current) return;
     event.preventDefault();
     event.stopPropagation();
@@ -721,7 +816,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   // ---- sub-canvas card gestures ---------------------------------------------
   const cardPointerDown = (event: React.PointerEvent<HTMLElement>, canvasId: string) => {
     if (propsRef.current.busy) return;
-    if (event.button === 1 || (event.button === 0 && spaceRef.current)) return;
+    if (panPointer(event) || isEditable(event.target)) return;
     if (event.button !== 0 || cardDragRef.current) return;
     const card = state.canvases.find((item) => item.id === canvasId);
     if (!card?.frame) return;
@@ -811,6 +906,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
 
   const connectStart = (event: React.PointerEvent<HTMLElement>, node: CanvasNode, side: EdgeSide) => {
     if (propsRef.current.busy) return;
+    if (panPointer(event) || isEditable(event.target)) return;
     if (event.button !== 0 || connectRef.current || nodeDragRef.current || panRef.current) return;
     const path = connectPathRef.current;
     if (!path) return;
@@ -846,23 +942,15 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     const move = (native: PointerEvent) => { if (native.pointerId === pointerId) update(native.clientX, native.clientY); };
     const up = (native: PointerEvent) => { if (native.pointerId === pointerId) complete(true); };
     const cancel = () => complete(false);
-    const escape = (native: KeyboardEvent) => {
-      if (native.key !== "Escape") return;
-      native.preventDefault();
-      native.stopPropagation();
-      complete(false);
-    };
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
     element.addEventListener("pointercancel", cancel);
     element.addEventListener("lostpointercapture", cancel);
-    window.addEventListener("keydown", escape, true);
     session.cleanup = () => {
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", up);
       element.removeEventListener("pointercancel", cancel);
       element.removeEventListener("lostpointercapture", cancel);
-      window.removeEventListener("keydown", escape, true);
     };
     connectRef.current = session;
     path.setAttribute("d", `M ${start.x} ${start.y} L ${start.x} ${start.y}`);
@@ -872,32 +960,41 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   };
 
   // ---- viewport gestures -----------------------------------------------------
-  const viewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    if (target.closest(".mini-map")) return;
-    const shouldPan = event.button === 1 || (event.button === 0 && spaceRef.current);
-    if (shouldPan) {
-      // Keep the pan start free of React state: adopt the glide's live frame.
-      stopGlide();
-      event.preventDefault();
-      event.stopPropagation();
-      panRef.current = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        originX: offsetRef.current.x,
-        originY: offsetRef.current.y,
-      };
-      if (!capturePointer(viewportRef.current, event.pointerId)) {
-        panRef.current = null;
-        syncBusy();
-        return;
-      }
+  // Capture before nodes, card buttons, handles and edge hit areas can consume
+  // pointerdown; every canvas item is a valid starting point for the hand tool.
+  const viewportPointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".mini-map") || isEditable(event.target)) return;
+    if (!panPointer(event)) {
+      suppressPanClickRef.current = false;
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (panRef.current || selectRef.current || nodeDragRef.current || cardDragRef.current || connectRef.current) return;
+    stopGlide();
+    panRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: offsetRef.current.x,
+      originY: offsetRef.current.y,
+    };
+    suppressPanClickRef.current = true;
+    if (!capturePointer(viewportRef.current, event.pointerId)) {
+      panRef.current = null;
       syncBusy();
       return;
     }
+    setPanning(true);
+    syncBusy();
+  };
+
+  const viewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".mini-map") || isEditable(event.target)) return;
+    if (event.button !== 0 || propsRef.current.busy || panRef.current || selectRef.current || nodeDragRef.current || cardDragRef.current || connectRef.current) return;
     settleGlide();
-    if (event.button !== 0 || propsRef.current.busy) return;
     event.preventDefault();
     event.stopPropagation();
     const start = worldPointFromClient(event.clientX, event.clientY);
@@ -935,14 +1032,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     if (pan && pan.pointerId === event.pointerId) {
       panRef.current = null;
       if (viewportRef.current?.hasPointerCapture(event.pointerId)) viewportRef.current.releasePointerCapture(event.pointerId);
+      setPanning(false);
+      // Navigation is safe to retain on pointercancel/lost capture as well;
+      // publishing it keeps React, the mini-map and persistence in agreement.
+      commitViewport(offsetRef.current, zoomRef.current);
       syncBusy();
-      if (commit) {
-        setOffset(offsetRef.current);
-        setZoom(zoomRef.current);
-        propsRef.current.onViewport({ x: offsetRef.current.x, y: offsetRef.current.y, zoom: zoomRef.current });
-        // A pan may interrupt a zoom glide; keep the zoom readout truthful.
-        propsRef.current.onZoomChange(zoomRef.current);
-      }
       return;
     }
     const select = selectRef.current;
@@ -1061,12 +1155,12 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     nodePointerDown, nodePointerMove, finishNodeDrag,
     cardPointerDown, cardPointerMove, finishCardDrag,
     connectStart,
-    openNode: (node: CanvasNode, origin: HTMLElement) => propsRef.current.onOpenContent(node.contentId, origin),
-    toggleNode: (nodeId: string) => propsRef.current.onSelectNode(nodeId, true),
+    openNode: (node: CanvasNode, origin: HTMLElement) => { if (!handToolActive()) propsRef.current.onOpenContent(node.contentId, origin); },
+    toggleNode: (nodeId: string) => { if (!handToolActive()) propsRef.current.onSelectNode(nodeId, true); },
     nodeActions: (event: React.MouseEvent<HTMLElement> | null, node: CanvasNode) => propsRef.current.onNodeActions(event, node.id),
-    openCard: (canvasId: string) => propsRef.current.onOpenCanvas(canvasId),
+    openCard: (canvasId: string) => { if (!handToolActive()) propsRef.current.onOpenCanvas(canvasId); },
     cardMenu: (event: React.MouseEvent<HTMLElement> | null, canvasId: string) => propsRef.current.onCardMenu(event, canvasId),
-    edgeSelect: (edgeId: string, toggle: boolean) => propsRef.current.onSelectEdge(edgeId, toggle),
+    edgeSelect: (edgeId: string, toggle: boolean) => { if (!handToolActive()) propsRef.current.onSelectEdge(edgeId, toggle); },
     edgeMenu: (edgeId: string, clientX: number, clientY: number) => propsRef.current.onEdgeMenu(edgeId, clientX, clientY),
   };
 
@@ -1089,22 +1183,34 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const handleEdgeMenu = useCallback((edgeId: string, clientX: number, clientY: number) => implRef.current?.edgeMenu(edgeId, clientX, clientY), []);
 
   const empty = nodes.length === 0 && cards.length === 0;
+  const handTool = interactionMode === "pan" || spacePressed;
+  const suppressPanActivation = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".mini-map") || isEditable(event.target)) return;
+    if (!handToolActive() && !suppressPanClickRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   return (
     <div
       ref={viewportRef}
-      className={`canvas-viewport pattern-${props.appearance.pattern}${props.enterMotion === "into" ? " canvas-enter-into" : props.enterMotion === "out" ? " canvas-enter-out" : ""}${spacePressed ? " hand-tool" : ""}`}
+      className={`canvas-viewport pattern-${props.appearance.pattern}${props.enterMotion === "into" ? " canvas-enter-into" : props.enterMotion === "out" ? " canvas-enter-out" : ""}${handTool ? " hand-tool" : ""}${panning ? " is-panning" : ""}`}
       style={{
-        "--canvas-bg": props.appearance.background,
-        "--canvas-pattern": patternInk(props.appearance),
+        "--canvas-bg": props.appearance.backgroundCustomized ? props.appearance.background : "var(--surface-canvas)",
+        "--canvas-pattern": props.appearance.inkCustomized ? patternInk(props.appearance) : "var(--canvas-pattern-default)",
+        cursor: panning ? "grabbing" : handTool ? "grab" : undefined,
       } as CSSProperties}
       role="region"
       aria-label={`画布：${canvas.name}`}
+      onPointerDownCapture={viewportPointerDownCapture}
       onPointerDown={viewportPointerDown}
+      onClickCapture={suppressPanActivation}
+      onDoubleClickCapture={suppressPanActivation}
       onPointerMove={viewportPointerMove}
       onPointerUp={(event) => finishViewportGesture(event, true)}
       onPointerCancel={(event) => finishViewportGesture(event, false)}
-      onLostPointerCapture={(event) => finishViewportGesture(event, true)}
+      onLostPointerCapture={(event) => finishViewportGesture(event, false)}
       onContextMenu={(event) => {
         event.preventDefault();
         const target = event.target instanceof Element ? event.target : null;

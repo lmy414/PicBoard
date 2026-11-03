@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Floating PicBoard regression</title></head>
+<body><div id="root"></div>
+<script type="module">
+  import React from 'react';
+  import { createRoot } from 'react-dom/client';
+  import App from '/renderer/src/App.tsx';
+  import { initializeTheme } from '/renderer/src/ui/theme.ts';
+  import '/renderer/src/styles.css';
+
+  const parameters = new URLSearchParams(location.search);
+  localStorage.clear();
+  localStorage.setItem('quick-image-board.history-open', parameters.get('history') === 'off' ? '0' : '1');
+  if (parameters.has('sidebar')) localStorage.setItem('quick-image-board.sidebar-collapsed', parameters.get('sidebar') === 'off' ? '1' : '0');
+  const iso = '2026-11-03T12:00:00.000Z';
+  const sample = document.createElement('canvas'); sample.width = 640; sample.height = 400;
+  const ctx = sample.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 640, 400); gradient.addColorStop(0, '#b6cba8'); gradient.addColorStop(1, '#e9dfc3');
+  ctx.fillStyle = gradient; ctx.fillRect(0, 0, 640, 400);
+  ctx.fillStyle = '#567d62'; ctx.beginPath(); ctx.moveTo(0, 320); ctx.lineTo(210, 110); ctx.lineTo(420, 330); ctx.lineTo(560, 180); ctx.lineTo(640, 290); ctx.lineTo(640, 400); ctx.lineTo(0, 400); ctx.fill();
+  ctx.fillStyle = '#fff8dd'; ctx.beginPath(); ctx.arc(505, 82, 35, 0, Math.PI * 2); ctx.fill();
+  ctx.font = '28px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('PicBoard · 灵感收集', 28, 365);
+  const sampleData = sample.toDataURL('image/png');
+  const sampleBytes = Array.from(new Uint8Array(await (await fetch(sampleData)).arrayBuffer()));
+  const assets = new Map([['original', { url: sampleData, data: sampleBytes, mime: 'image/png' }]]);
+  function content(id, kind, preview, image = null) {
+    return { id, kind, preview, textLength: preview.length, url: kind === 'link' ? preview : null,
+      image, coverAsset: null, categoryId: null, source: 'manual', createdAt: iso, updatedAt: iso, lastUsedAt: iso };
+  }
+  function imageContent(id, fileName, width = 640, height = 400, byteSize = sampleBytes.length) {
+    return content(id, 'image', fileName, { fileName, relativePath: `${id}/${fileName}`, width, height, byteSize });
+  }
+  let state = { revision: 1, activeCanvasId: 'main', categories: [{ id: 'ideas', name: '灵感', color: '#58896b' }], edges: [],
+    contents: {
+      original: imageContent('original', '山间灵感.png'),
+      note: content('note', 'text', '把灵感放到画板上\n拖动整理，双击编辑。\n右下方的历史里保留每一次复制。'),
+      link: content('link', 'link', 'https://example.com/design-notes'),
+    },
+    canvases: [
+      { id: 'main', name: '我的灵感画板', parentId: null, frame: null, createdAt: iso, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [
+        { id: 'original-node', contentId: 'original', x: 70, y: 130, width: 280, height: 215 },
+        { id: 'note-node', contentId: 'note', x: 390, y: 140, width: 280, height: 145 },
+        { id: 'link-node', contentId: 'link', x: 95, y: 390, width: 280, height: 96 },
+      ] },
+      { id: 'reference', name: '研究参考', parentId: null, frame: null, createdAt: iso, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] },
+    ] };
+  const clone = () => structuredClone(state);
+  const calls = { place: [], save: [], open: [], viewports: [], drags: 0,
+    settings: [], associationReads: 0, configureAssociation: 0, directories: [], pluginLists: 0, categories: [] };
+  let desktopSettings = { closeBehavior: 'float', autoStart: false, autoStartAvailable: false, captureEnabled: true, historyRetentionDays: 30, snapToGrid: false, gridSize: 24 };
+  let associationRegistered = false;
+  window.floatingBoard = { calls, get state() { return clone(); }, get desktopSettings() { return structuredClone(desktopSettings); },
+    failPlacement: parameters.has('failPlacement'), failAssociation: false };
+  const host = {
+    loadState: async () => clone(), onStateChanged: () => () => {},
+    getDesktopSettings: async () => structuredClone(desktopSettings),
+    setDesktopSettings: async (patch) => { calls.settings.push(structuredClone(patch)); desktopSettings = { ...desktopSettings, ...patch }; return structuredClone(desktopSettings); },
+    getImageAssociation: async () => { calls.associationReads += 1; return { available: true, registered: associationRegistered }; },
+    configureImageAssociation: async () => {
+      calls.configureAssociation += 1;
+      if (window.floatingBoard.failAssociation) throw new Error('测试默认应用设置打开失败');
+      associationRegistered = true;
+    },
+    pickDirectory: async (initialPath) => { calls.directories.push(initialPath); return 'E:\\PicBoard-test\\images'; },
+    listPlugins: async () => { calls.pluginLists += 1; return { directory: 'E:\\PicBoard-test\\plugins', plugins: [], errors: [] }; },
+    createCategory: async (name) => {
+      calls.categories.push(name); state = { ...state, revision: state.revision + 1,
+        categories: [...state.categories, { id: `category-${state.categories.length + 1}`, name }] }; return clone();
+    },
+    isMaximized: async () => false, toggleMaximized: async () => false, startTitlebarDrag: async () => { calls.drags += 1; }, minimizeWindow: async () => {}, closeWindow: async () => {},
+    imageUrl: (id) => assets.get(id)?.url ?? sampleData,
+    readImage: async (id) => ({ data: assets.get(id).data, mime: assets.get(id).mime, name: state.contents[id].image.fileName }),
+    getContentBody: async (id) => ({ text: state.contents[id]?.preview ?? '', html: null }),
+    setCanvasViewport: async (id, viewport) => {
+      calls.viewports.push({ id, viewport }); state = { ...state, canvases: state.canvases.map(c => c.id === id ? { ...c, viewport } : c) }; return clone();
+    },
+    setActiveCanvas: async (id) => { state = { ...state, activeCanvasId: id }; return clone(); },
+    copyContents: async (ids) => ({ copied: ids.length }), openExternalUrl: async () => {},
+    openImageFile: async () => {
+      const id = 'imported'; calls.open.push(id); assets.set(id, { url: sampleData, data: sampleBytes, mime: 'image/png' });
+      state = { ...state, revision: state.revision + 1, contents: { ...state.contents, [id]: imageContent(id, '导入风景.png') } }; return { state: clone(), contentId: id };
+    },
+    saveImageCopy: async (input) => {
+      const id = `copy-${calls.save.length + 1}`;
+      const bytes = new Uint8Array(input.data); const bitmap = await createImageBitmap(new Blob([bytes]));
+      const url = URL.createObjectURL(new Blob([bytes]));
+      assets.set(id, { url, data: input.data, mime: input.mime });
+      calls.save.push({ id, name: input.name, bytes: bytes.length, width: bitmap.width, height: bitmap.height });
+      state = { ...state, revision: state.revision + 1, contents: { ...state.contents, [id]: imageContent(id, input.name, bitmap.width, bitmap.height, bytes.length) } };
+      bitmap.close(); return { state: clone(), contentId: id };
+    },
+    placeContent: async (contentId, canvasId, point) => {
+      calls.place.push({ contentId, canvasId, point });
+      if (window.floatingBoard.failPlacement) throw new Error('测试放置失败');
+      const image = state.contents[contentId].image;
+      const width = 280, height = Math.round(width * image.height / image.width) + 40;
+      const node = { id: `${contentId}-node`, contentId, x: point.x - width / 2, y: point.y - height / 2, width, height };
+      state = { ...state, revision: state.revision + 1, canvases: state.canvases.map(c => c.id === canvasId ? { ...c, nodes: [...c.nodes, node] } : c) }; return clone();
+    },
+    getPluginSettings: async () => ({ plugins: [] }),
+  };
+  window.imageBoard = host;
+  initializeTheme();
+  createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body></html>

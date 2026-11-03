@@ -10,7 +10,7 @@ import { SuggestionPluginKey, exitSuggestion } from "@tiptap/suggestion";
 import type { SuggestionProps } from "@tiptap/suggestion";
 import type { ContentAsset, ContentBody, ContentRecord } from "../../../shared/image-board";
 import { assetRef, isHttpUrl } from "../content/content-meta";
-import { exceedsBodyLimit, isPlainDoc, plainTextToDoc } from "./editor-doc";
+import { exceedsBodyLimit, plainTextToDoc } from "./editor-doc";
 import { ContentImage } from "./editor-image";
 import { PASTE_SANITIZE_PATTERN, imageFileName, isImageFile, sanitizePastedHtml } from "./editor-assets";
 import { SlashMenu, createSlashExtension } from "./editor-slash";
@@ -49,13 +49,7 @@ interface ImageItem {
 }
 
 /** Editor output in the exact shape the host stores. */
-function snapshotOf(editor: Editor, richRef: MutableRefObject<boolean>): ContentBody {
-  const json = editor.getJSON();
-  const plain = isPlainDoc(json);
-  // Formatting (or any non-plain block) is an automatic promotion: once the
-  // content has been rich, a later plain snapshot (removed marks, cleared
-  // document) must not demote it again.
-  if (!plain) richRef.current = true;
+function snapshotOf(editor: Editor): ContentBody {
   return {
     // TipTap's default text serializer drops hard breaks; keep them as newlines
     // so plain content never loses Shift+Enter line breaks.
@@ -63,10 +57,9 @@ function snapshotOf(editor: Editor, richRef: MutableRefObject<boolean>): Content
       blockSeparator: "\n",
       textSerializers: { hardBreak: () => "\n", image: () => "[图片]" },
     }),
-    // The host treats `html: null` as plain text. A rich content therefore
-    // keeps sending HTML even when the document is empty or only paragraphs;
-    // otherwise typing the first plain character would demote it.
-    html: plain && !richRef.current ? null : editor.getHTML(),
+    // Every text page uses the rich editor. The host derives richText from
+    // non-null HTML, including ordinary paragraphs and empty documents.
+    html: editor.getHTML(),
   };
 }
 
@@ -91,11 +84,6 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
   const mountedRef = useRef(true);
   const contentIdRef = useRef(content.id);
   contentIdRef.current = content.id;
-  // Richness is learned once and only promoted: the record kind, a loaded HTML
-  // body or formatting all keep it true. Never let a stale text-kind update
-  // sent before formatting demote an editor that has already gone rich.
-  const richRef = useRef(content.kind === "richText");
-  if (content.kind === "richText") richRef.current = true;
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
   const lastSavedRef = useRef<SavedSnapshot | null>(null);
@@ -216,7 +204,7 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
     const instance = editorRef.current;
     if (!instance || !readyRef.current || !dirtyRef.current) return;
     const version = versionRef.current;
-    const next = snapshotOf(instance, richRef);
+    const next = snapshotOf(instance);
     const saved = lastSavedRef.current;
     if (saved && saved.text === next.text && saved.html === next.html) {
       dirtyRef.current = false;
@@ -424,7 +412,6 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
   // Creating the editor with the loaded document keeps reload out of history.
   useEffect(() => {
     if (!body) return;
-    if (body.html !== null) richRef.current = true;
     let instance: Editor;
     try {
       instance = createEditor(body);
@@ -434,7 +421,10 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
     }
     editorRef.current = instance;
     readyRef.current = true;
-    lastSavedRef.current = snapshotOf(instance, richRef);
+    const initialSnapshot = snapshotOf(instance);
+    // Merely opening legacy plain text must not rewrite it. Keep its stored
+    // null HTML as the baseline so the first edit promotes it to richText.
+    lastSavedRef.current = body.html === null ? { ...initialSnapshot, html: null } : initialSnapshot;
     dirtyRef.current = false;
     setEditor(instance);
     applySaveStatus("saved");
@@ -446,7 +436,7 @@ export function TextContentPage({ content, lifecycle, apiRef, callbacks }: TextC
       }
       readyRef.current = false;
       editorRef.current = null;
-      const pending = dirtyRef.current && !lifecycle.discard ? snapshotOf(instance, richRef) : null;
+      const pending = dirtyRef.current && !lifecycle.discard ? snapshotOf(instance) : null;
       const saved = lastSavedRef.current;
       instance.destroy();
       setEditor(null);

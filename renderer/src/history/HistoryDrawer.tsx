@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import type { AppState, ContentKind, ContentRecord } from "../../../shared/image-board";
-import { KIND_LABEL, buildPlacementIndex, contentTitle, matchesQuery, relativeTime } from "../content/content-meta";
+import type { AppState, ContentRecord } from "../../../shared/image-board";
+import { KIND_LABEL, KIND_ORDER, buildPlacementIndex, contentTitle, matchesContentKind, matchesQuery, relativeTime } from "../content/content-meta";
+import type { DisplayContentKind } from "../content/content-meta";
 import { IconClipboard, KindIcon } from "../ui/ContentIcons";
 import { IconClose, IconSearch } from "../ui/Icons";
 import { usePresence } from "../ui/motion";
@@ -20,7 +21,7 @@ export interface HistoryDrawerProps {
   onDropToCanvas(contentId: string, clientX: number, clientY: number): boolean;
 }
 
-type KindFilter = "all" | ContentKind;
+type KindFilter = "all" | DisplayContentKind;
 
 const INITIAL_ITEMS = 100;
 const PAGE_SIZE = 100;
@@ -203,7 +204,7 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
 
   const filtered = useMemo(() => {
     return Object.values(state.contents)
-      .filter((content) => (kind === "all" ? true : content.kind === kind))
+      .filter((content) => matchesContentKind(content, kind))
       .filter((content) => matchesQuery(content, query))
       .sort((left, right) => {
         const a = Date.parse(left.lastUsedAt);
@@ -506,7 +507,7 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
             >
               全部
             </button>
-            {(["text", "richText", "link", "image"] as ContentKind[]).map((entry) => (
+            {KIND_ORDER.map((entry) => (
               <button
                 key={entry}
                 type="button"

@@ -120,7 +120,7 @@ test("renders header, tabs with counts, stats and the newest-first list", async 
   expect(document.querySelector(".tray-name")?.textContent).toBe("PicBoard");
   const chips = Array.from(document.querySelectorAll<HTMLButtonElement>(".tray-tab")).map((chip) => chip.textContent);
   expect(chips.some((label) => label?.startsWith("全部") && label.includes("2"))).toBe(true);
-  expect(chips.some((label) => label?.startsWith("文本") && label.includes("2"))).toBe(true);
+  expect(chips.some((label) => label?.startsWith("富文本") && label.includes("2"))).toBe(true);
   expect(document.querySelector(".tray-stats")?.textContent).toContain("今天 2 条");
   expect(document.querySelector(".tray-stats")?.textContent).toContain("共 2 条");
   // "b" has the newer lastUsedAt, so it is listed first.

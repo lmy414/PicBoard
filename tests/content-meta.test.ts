@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AppState, CanvasNode, CanvasRecord, ContentRecord } from "../shared/image-board";
 import {
+  KIND_LABEL,
+  KIND_ORDER,
   buildPlacementIndex,
+  displayContentKind,
+  matchesContentKind,
   contentTitle,
   formatByteSize,
   formatTimestamp,
@@ -46,6 +50,34 @@ function makeCanvas(id: string, nodes: CanvasNode[]): CanvasRecord {
     viewport: { x: 0, y: 0, zoom: 1 },
   };
 }
+
+describe("content kind presentation", () => {
+  it("exposes one rich-text label and filter for both stored text kinds", () => {
+    expect(KIND_LABEL.text).toBe("富文本");
+    expect(KIND_LABEL.richText).toBe("富文本");
+    expect(KIND_ORDER).toEqual(["richText", "link", "image"]);
+    expect(displayContentKind("text")).toBe("richText");
+    expect(displayContentKind("richText")).toBe("richText");
+    expect(displayContentKind("link")).toBe("link");
+    expect(displayContentKind("image")).toBe("image");
+  });
+
+  it("matches both text kinds without changing their stored kind", () => {
+    const plain = makeContent({ kind: "text" });
+    const rich = makeContent({ kind: "richText" });
+    const link = makeContent({ kind: "link" });
+    for (const filter of ["text", "richText"] as const) {
+      expect(matchesContentKind(plain, filter)).toBe(true);
+      expect(matchesContentKind(rich, filter)).toBe(true);
+      expect(matchesContentKind(link, filter)).toBe(false);
+    }
+    expect(matchesContentKind(plain, "all")).toBe(true);
+    expect(matchesContentKind(link, "link")).toBe(true);
+    expect(matchesContentKind(plain, "link")).toBe(false);
+    expect(plain.kind).toBe("text");
+    expect(rich.kind).toBe("richText");
+  });
+});
 
 describe("relativeTime", () => {
   it("labels the first minute as 刚刚", () => {

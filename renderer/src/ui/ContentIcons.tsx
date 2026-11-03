@@ -29,14 +29,6 @@ function Icon({ size = 16, children, ...rest }: IconProps & { children: ReactNod
   );
 }
 
-function TextKindGlyph({ size }: { size: number }) {
-  return (
-    <Icon size={size}>
-      <path d="M4.5 6.5h15M4.5 12h15M4.5 17.5h9" />
-    </Icon>
-  );
-}
-
 function RichTextKindGlyph({ size }: { size: number }) {
   return (
     <Icon size={size}>
@@ -70,7 +62,6 @@ function ImageKindGlyph({ size }: { size: number }) {
 export function KindIcon({ kind, size = 16 }: { kind: ContentKind; size?: number }) {
   switch (kind) {
     case "text":
-      return <TextKindGlyph size={size} />;
     case "richText":
       return <RichTextKindGlyph size={size} />;
     case "link":
