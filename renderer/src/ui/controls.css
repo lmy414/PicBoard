@@ -23,7 +23,7 @@
   box-shadow: var(--elev-3);
   color: var(--text);
   font-size: 11px;
-  animation: qib-pop-in 0.16s ease-out both;
+  animation: qib-pop-in 0.2s var(--motion-spring) both;
   outline: none;
 }
 
@@ -35,8 +35,18 @@
   border-color: var(--accent);
 }
 
+/* Origin-aware entrance: panels that flipped above the anchor slide down. */
+.qib-popover[data-from="above"] {
+  animation-name: qib-pop-in-above;
+}
+
 @keyframes qib-pop-in {
   from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes qib-pop-in-above {
+  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -64,6 +74,21 @@
   cursor: pointer;
   user-select: none;
   outline: none;
+  animation: qib-option-in 0.16s var(--motion-ease-out) both;
+}
+
+/* Grouped options enter with a small stagger (editorial rhythm, T2 tier). */
+.qib-option:nth-child(2) { animation-delay: 16ms; }
+.qib-option:nth-child(3) { animation-delay: 32ms; }
+.qib-option:nth-child(4) { animation-delay: 48ms; }
+.qib-option:nth-child(5) { animation-delay: 64ms; }
+.qib-option:nth-child(6) { animation-delay: 80ms; }
+.qib-option:nth-child(7) { animation-delay: 96ms; }
+.qib-option:nth-child(n+8) { animation-delay: 112ms; }
+
+@keyframes qib-option-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .qib-option:hover,
@@ -579,7 +604,7 @@
   border-radius: 50%;
   background: var(--surface-panel);
   box-shadow: 0 1px 2px rgba(20, 28, 22, .18);
-  transition: transform 0.16s ease;
+  transition: transform 0.2s var(--motion-spring);
 }
 
 .qib-toggle-row input:checked + .qib-switch {

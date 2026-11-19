@@ -194,6 +194,8 @@ export interface DesktopSettings {
   snapToGrid: boolean;
   /** Canvas grid spacing and the host's snap step. Default 24. */
   gridSize: GridSize;
+  /** Titlebar pin (always-on-top) choice for the main window. */
+  windowPinned: boolean;
 }
 
 export interface DesktopSettingsPatch {
@@ -321,6 +323,16 @@ export interface ImageBoardApi {
   startResizeDragging(direction: WindowResizeDirection): Promise<void>;
   toggleMaximized(): Promise<boolean>;
   isMaximized(): Promise<boolean>;
+  /** Current titlebar pin (always-on-top) state of the main window. */
+  isWindowPinned(): Promise<boolean>;
+  /** Toggle the titlebar pin; returns the new state and persists it. */
+  toggleWindowPinned(): Promise<boolean>;
+  /** Snap the main window to a work-area zone given as fractions (x0,y0,x1,y1). */
+  snapWindowToZone(zone: { x0: number; y0: number; x1: number; y1: number }): Promise<void>;
+  /** Content-layer cue: the host is about to hide the window; fade the shell out. */
+  onWindowHideAnim(listener: () => void): () => void;
+  /** Content-layer cue: the window was just re-shown; play the shell entrance. */
+  onWindowShownAnim(listener: () => void): () => void;
   closeWindow(): Promise<void>;
   minimizeWindow(): Promise<void>;
   quitApp(): Promise<void>;

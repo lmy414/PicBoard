@@ -47,6 +47,23 @@ impl DesktopState {
             .clone()
     }
 
+    /// Persist the titlebar pin choice; failures are logged, never surfaced.
+    pub fn set_window_pinned(&self, pinned: bool) {
+        let mut prefs = self.current();
+        if prefs.main_window_pinned == pinned {
+            return;
+        }
+        prefs.main_window_pinned = pinned;
+        if let Err(error) = save_prefs(&self.data_root, &prefs) {
+            eprintln!("[desktop] failed to save pinned preference: {error}");
+            return;
+        }
+        *self
+            .prefs
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = prefs;
+    }
+
     /// `true` while clipboard capture is recording (mirrors `captureEnabled`).
     pub fn capture_enabled_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.capture)
@@ -206,6 +223,11 @@ pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<()
             Ok(())
         }
         CloseBehavior::Tray => {
+            // Animated path: the controller emits `window:hide-anim`, gives the
+            // renderer ~200 ms to fade its shell, then hides the window.
+            if let Some(controller) = app.try_state::<crate::window_controller::WindowController>() {
+                return controller.hide_to_tray();
+            }
             let window = app
                 .get_webview_window("main")
                 .ok_or_else(|| AppError::message("主窗口不存在"))?;

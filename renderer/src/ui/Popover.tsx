@@ -61,7 +61,7 @@ export function Popover({
   panelProps,
   restoreFocus = true,
 }: PopoverProps) {
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; above: boolean } | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const anchorRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -113,7 +113,7 @@ export function Popover({
     node.style.overflowY = "auto";
     const proposedTop = flipAbove ? rect.top - GAP - height : rect.bottom + GAP;
     const top = Math.max(EDGE, Math.min(proposedTop, vh - EDGE - node.offsetHeight));
-    setPlace({ left: Math.round(left), top: Math.round(top) });
+    setPlace({ left: Math.round(left), top: Math.round(top), above: flipAbove });
   }, [align, width]);
 
   useLayoutEffect(() => {
@@ -191,6 +191,7 @@ export function Popover({
     className: classes,
     style: { ...panelProps?.style, width: panelWidth },
   };
+  if (place) (merged as Record<string, unknown>)["data-from"] = place.above ? "above" : "below";
   return createPortal(
     <div className="qib-popover-layer" style={{ left: place?.left ?? 0, top: place?.top ?? 0 }}>
       <div {...merged} data-esc-layer>{children}</div>

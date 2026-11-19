@@ -285,6 +285,33 @@ pub struct DesktopSettingsDto {
     pub history_retention_days: crate::desktop::HistoryRetentionDays,
     pub snap_to_grid: bool,
     pub grid_size: crate::desktop::GridSize,
+    pub window_pinned: bool,
+}
+
+/// Work-area fractions for the renderer's Snap Layouts flyout. Each coordinate
+/// is clamped to 0..1 and the zone must have positive area.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct SnapZone {
+    pub x0: f64,
+    pub y0: f64,
+    pub x1: f64,
+    pub y1: f64,
+}
+
+impl SnapZone {
+    pub fn validated(self) -> Result<Self, crate::error::AppError> {
+        let clamp = |value: f64| value.clamp(0.0, 1.0);
+        let zone = Self {
+            x0: clamp(self.x0),
+            y0: clamp(self.y0),
+            x1: clamp(self.x1),
+            y1: clamp(self.y1),
+        };
+        if zone.x1 - zone.x0 < 0.1 || zone.y1 - zone.y0 < 0.1 {
+            return Err(crate::error::AppError::message("贴靠区域过小"));
+        }
+        Ok(zone)
+    }
 }
 
 /// One discovered plugin folder.

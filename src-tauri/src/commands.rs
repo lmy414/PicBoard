@@ -498,6 +498,7 @@ fn settings_dto(desktop: &State<'_, crate::desktop::DesktopState>) -> DesktopSet
         history_retention_days: prefs.history_retention_days,
         snap_to_grid: prefs.snap_to_grid,
         grid_size: prefs.grid_size,
+        window_pinned: prefs.main_window_pinned,
     }
 }
 
@@ -612,6 +613,27 @@ pub fn toggle_maximized(window: State<'_, WindowController>) -> Result<bool, App
 #[tauri::command]
 pub fn is_maximized(window: State<'_, WindowController>) -> bool {
     window.is_maximized()
+}
+
+#[tauri::command]
+pub fn is_window_pinned(window: State<'_, WindowController>) -> bool {
+    window.is_pinned()
+}
+
+#[tauri::command]
+pub fn toggle_window_pinned(window: State<'_, WindowController>) -> Result<bool, AppError> {
+    window.toggle_pinned()
+}
+
+/// Snap the main window to a work-area zone given as fractions of the
+/// current monitor's work area (0..1). Used by the renderer's Snap Layouts
+/// flyout on the maximize button.
+#[tauri::command]
+pub fn snap_window_to_zone(
+    window: State<'_, WindowController>,
+    zone: crate::dto::SnapZone,
+) -> Result<(), AppError> {
+    window.snap_to_zone(zone)
 }
 
 #[tauri::command]

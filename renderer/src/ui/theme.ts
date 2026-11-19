@@ -94,9 +94,23 @@ export function resolveTheme(
 function applyThemeToDocument(preference: ThemePreference, resolvedTheme: ResolvedTheme): void {
   if (typeof document === "undefined" || !document.documentElement) return;
   const root = document.documentElement;
-  root.dataset.theme = resolvedTheme;
-  root.dataset.themePreference = preference;
-  root.style.colorScheme = resolvedTheme;
+  const next = () => {
+    root.dataset.theme = resolvedTheme;
+    root.dataset.themePreference = preference;
+    root.style.colorScheme = resolvedTheme;
+  };
+  // Crossfade the first application without ceremony; later switches play a
+  // short View Transition so the palette change reads as one motion.
+  const alreadyThemed = Boolean(root.dataset.theme ?? root.style.colorScheme);
+  const reduced = typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const doc = document as Document & { startViewTransition?: (update: () => void) => unknown };
+  if (!alreadyThemed || reduced || typeof doc.startViewTransition !== "function") {
+    next();
+    return;
+  }
+  doc.startViewTransition(next);
 }
 
 function commitSnapshot(preference: ThemePreference, resolvedTheme: ResolvedTheme): void {

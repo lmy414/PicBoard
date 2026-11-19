@@ -148,6 +148,12 @@ export function createTauriAdapter(): ImageBoardApi {
       call<void>("start_resize_dragging", { direction }),
     toggleMaximized: () => call<boolean>("toggle_maximized"),
     isMaximized: () => call<boolean>("is_maximized"),
+    isWindowPinned: () => call<boolean>("is_window_pinned"),
+    toggleWindowPinned: () => call<boolean>("toggle_window_pinned"),
+    snapWindowToZone: (zone: { x0: number; y0: number; x1: number; y1: number }) =>
+      call<void>("snap_window_to_zone", { zone }),
+    onWindowHideAnim: (listener: () => void) => subscribe("window:hide-anim", listener),
+    onWindowShownAnim: (listener: () => void) => subscribe("window:shown-anim", listener),
     closeWindow: () => call<void>("close_window"),
     minimizeWindow: () => call<void>("minimize_window"),
     quitApp: () => call<void>("quit_app"),

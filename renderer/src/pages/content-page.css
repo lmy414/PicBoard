@@ -10,16 +10,18 @@
   color: var(--text);
 }
 
-/* Compact toolbar shared with the app's navigation area. */
+/* Compact toolbar shared with the app's navigation area. Embedded in the
+   topbar lane: transparent over the header surface, tighter rhythm. */
 .cp-toolbar {
   display: flex;
   align-items: center;
-  flex: 0 0 auto;
-  gap: 6px;
+  flex: 0 1 auto;
+  gap: 4px;
   min-width: 0;
-  height: 36px;
-  padding: 3px 12px;
-  background: var(--surface-panel);
+  height: 30px;
+  padding: 2px 2px;
+  background: transparent;
+  overflow: hidden;
 }
 
 .cp-back {

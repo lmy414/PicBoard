@@ -18,6 +18,11 @@ const BOUNDS_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Event that carries a navigation instruction to the main window.
 pub(crate) const MAIN_NAVIGATE_EVENT: &str = "main:navigate";
 
+/// Content-layer animation cues for hide/re-show (the renderer fades its own
+/// shell before the host hides the window).
+pub(crate) const WINDOW_HIDE_ANIM_EVENT: &str = "window:hide-anim";
+pub(crate) const WINDOW_SHOW_ANIM_EVENT: &str = "window:shown-anim";
+
 struct Inner {
     handle: AppHandle,
     shutdown_requested: AtomicBool,
@@ -227,6 +232,12 @@ impl WindowController {
     /// to the hidden main window. Runs once during setup, before the reveal.
     pub fn restore_main_bounds(&self) -> Result<(), AppError> {
         let win = main_window(&self.inner.handle)?;
+        let pinned = self
+            .inner
+            .handle
+            .try_state::<crate::desktop::DesktopState>()
+            .map(|desktop| desktop.current().main_window_pinned)
+            .unwrap_or(false);
         let saved_monitor = self
             .inner
             .handle
@@ -247,7 +258,10 @@ impl WindowController {
         let saved = saved_window_bounds(&self.inner.handle);
         let bounds = window_geometry::fit_main_window(saved, work_area);
         set_main_window_flags(&win)?;
-        set_logical_bounds(&win, bounds, monitor.scale_factor())
+        set_logical_bounds(&win, bounds, monitor.scale_factor())?;
+        // The pin choice survives restarts; the flag setter above resets it.
+        win.set_always_on_top(pinned)?;
+        Ok(())
     }
 
     /// Called re-entrantly by tao from native move/size APIs. Only signal the
@@ -332,6 +346,7 @@ impl WindowController {
         }
         win.show()?;
         win.set_focus()?;
+        let _ = app.emit_to("main", WINDOW_SHOW_ANIM_EVENT, ());
         if let Some(readiness) = app.try_state::<crate::startup_readiness::StartupReadiness>() {
             readiness.mark_user_shown("main");
         }
@@ -348,6 +363,83 @@ impl WindowController {
 
     pub fn minimize_main_window(&self) -> Result<(), AppError> {
         main_window(&self.inner.handle)?.minimize()?;
+        Ok(())
+    }
+
+    /// Titlebar pin toggle: keep the window above all others. Persisted.
+    pub fn toggle_pinned(&self) -> Result<bool, AppError> {
+        let win = main_window(&self.inner.handle)?;
+        let pinned = !win.is_always_on_top()?;
+        win.set_always_on_top(pinned)?;
+        if let Some(desktop) = self.inner.handle.try_state::<crate::desktop::DesktopState>() {
+            desktop.set_window_pinned(pinned);
+        }
+        Ok(pinned)
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.inner
+            .handle
+            .try_state::<crate::desktop::DesktopState>()
+            .map(|desktop| desktop.current().main_window_pinned)
+            .unwrap_or(false)
+    }
+
+    /// Global-hotkey entry: summon the hidden window, dismiss the visible one.
+    pub fn toggle_main_visibility(&self) -> Result<(), AppError> {
+        let win = main_window(&self.inner.handle)?;
+        if win.is_visible().unwrap_or(false) {
+            self.hide_to_tray()
+        } else {
+            self.show_main_window(&self.inner.handle, None)
+        }
+    }
+
+    /// Snap the window to a zone of the current monitor's work area, given as
+    /// fractions (0..1). Restores a maximized window first so the new bounds
+    /// stick, and persists the result like any user-driven resize.
+    pub fn snap_to_zone(&self, zone: crate::dto::SnapZone) -> Result<(), AppError> {
+        let zone = zone.validated()?;
+        let win = main_window(&self.inner.handle)?;
+        let monitor = win
+            .current_monitor()?
+            .ok_or_else(|| AppError::message("无法获取显示器"))?;
+        let scale = monitor.scale_factor();
+        let work_area = monitor_work_area_logical(&monitor);
+        let width = ((work_area.width as f64 * (zone.x1 - zone.x0)).round() as i32)
+            .max(window_geometry::MAIN_MIN_WIDTH);
+        let height = ((work_area.height as f64 * (zone.y1 - zone.y0)).round() as i32)
+            .max(window_geometry::MAIN_MIN_HEIGHT);
+        let bounds = Rect {
+            x: (work_area.x as f64 + work_area.width as f64 * zone.x0).round() as i32,
+            y: (work_area.y as f64 + work_area.height as f64 * zone.y0).round() as i32,
+            width,
+            height,
+        };
+        if win.is_maximized()? {
+            win.unmaximize()?;
+        }
+        set_logical_bounds(&win, bounds, scale)?;
+        self.inner.bounds_saver.request();
+        Ok(())
+    }
+
+    /// Hide into the tray with a brief content-layer fade: the renderer plays
+    /// its animation on `window:hide-anim`, then the window hides if the user
+    /// has not re-shown it meanwhile.
+    pub fn hide_to_tray(&self) -> Result<(), AppError> {
+        let app = self.inner.handle.clone();
+        let win = main_window(&self.inner.handle)?;
+        if let Some(readiness) = app.try_state::<crate::startup_readiness::StartupReadiness>() {
+            readiness.mark_user_hidden("main");
+        }
+        let _ = app.emit_to("main", WINDOW_HIDE_ANIM_EVENT, ());
+        crate::platform::spawn_worker("picboard-hide-anim", move || {
+            std::thread::sleep(Duration::from_millis(200));
+            if win.is_visible().unwrap_or(false) {
+                let _ = win.hide();
+            }
+        });
         Ok(())
     }
 

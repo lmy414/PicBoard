@@ -287,13 +287,18 @@ exits ease in, run shorter, and never take pointer input. */
   position: relative;
   z-index: 2;
 }
+/* Page/library toolbars embed into the topbar lane (between the breadcrumb
+   and the window buttons) instead of floating over the workspace. */
 .workspace-toolbar-host{
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
   position: relative;
   z-index: 2;
-  background: var(--surface-panel);
-  box-shadow: var(--elev-header-soft);
+  padding: 0 4px;
+  border-right: 1px solid var(--line);
 }
 .workspace-toolbar-host:empty{ display: none; }
 .window-drag-region{
@@ -381,11 +386,65 @@ exits ease in, run shorter, and never take pointer input. */
 .icon-button:active:not(:disabled){
   background: var(--surface-press-fill);
   box-shadow: var(--elev-inset-sm);
+  scale: .94;
 }
 .icon-button.active{
   background: var(--surface-pressed);
   box-shadow: var(--elev-inset-sm);
   color: var(--accent-ink);
+}
+/* The native hit test owns pointer events over the maximize button (Windows 11
+   Snap Layouts); the host pushes the hover cue as an event instead. */
+.icon-button.maximize-window.is-native-hover{
+  background: var(--surface-hover);
+  box-shadow: var(--elev-hover-sm);
+  color: var(--ink);
+}
+/* Content-layer cues for host-driven hide/re-show of the window. */
+html.app-window-hiding .app-shell{
+  animation: app-window-hide 180ms var(--motion-ease-in) forwards;
+}
+html.app-window-entering .app-shell{
+  animation: app-window-enter 240ms var(--motion-ease-out) both;
+}
+@keyframes app-window-hide{
+  to{ opacity: 0; scale: .97; translate: 0 6px; }
+}
+@keyframes app-window-enter{
+  from{ opacity: 0; scale: .97; translate: 0 6px; }
+}
+/* ---- window snap flyout (maximize-button hover) ------------------------- */
+.snap-flyout{ width: 218px !important; }
+.snap-flyout-grid{
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.snap-card{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 4px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.snap-cell{
+  width: 30px;
+  height: 42px;
+  border-radius: 4px;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: background var(--motion-fast) ease, scale var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+.snap-cell:hover{
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-line, var(--accent));
+}
+.snap-cell:active{ scale: .94; }
+.snap-cell:focus-visible{
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .history-button.active{
   background: var(--surface-pressed);
@@ -924,9 +983,20 @@ visible at the right edge of the scrollport. */
 .canvas-node.dragging{
   cursor: grabbing;
   z-index: 20;
-  scale: 1.03;
+  scale: 1.04;
   will-change: translate, scale;
   box-shadow: 0 0 0 1px var(--line), var(--elev-3);
+}
+/* Spring-back settle after the pointer releases a dragged node. */
+.canvas-node.drag-release{
+  animation: node-settle .2s var(--motion-spring);
+}
+@keyframes node-settle{
+  from{ scale: 1.04; }
+}
+/* Live ring while the elastic selection rect covers the node. */
+.canvas-node.select-hover{
+  box-shadow: var(--focus-ring), var(--accent-glow);
 }
 /* Snap jumps are eased instead of teleporting;
 free drags stay 1:1. */
@@ -2122,7 +2192,7 @@ layout change, so the canvas never moves while the pointer travels. */
   border: 1px solid var(--line);
   font-size: 12px;
   box-shadow: var(--shadow-popover);
-  animation: toast-in var(--motion-base) var(--motion-ease-out) both;
+  animation: toast-in var(--motion-base) var(--motion-spring) both;
 }
 .qib-toast.leaving{
   animation: toast-out var(--motion-fast) var(--motion-ease-in) both;

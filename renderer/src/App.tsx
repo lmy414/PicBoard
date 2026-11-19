@@ -11,7 +11,6 @@ import type {
   ImportViewport,
   MainNavigation,
   NewContentInput,
-  WindowResizeDirection,
 } from "../../shared/image-board";
 import { applySelection, mergeSelection } from "../../shared/canvas-selection";
 import { readCanvasAppearance, saveCanvasAppearance, type CanvasAppearance } from "./canvas/canvas-appearance";
@@ -22,6 +21,7 @@ import { LibraryView } from "./library/LibraryView";
 import { ContentPage } from "./pages/ContentPage";
 import { IconArrowLeft } from "./ui/ContentIcons";
 import { CanvasTree, ContextMenu } from "./ui/CanvasTree";
+import { Popover } from "./ui/Popover";
 import { CanvasDock, type CanvasTool } from "./ui/CanvasDock";
 import { ContentActions, type ContentActionContext, type PanelAnchor } from "./ui/ContentActions";
 import { SettingsPage, SettingsNavigation, type SettingsSection } from "./ui/SettingsPage";
@@ -221,11 +221,6 @@ function App() {
     event.preventDefault();
     titleDragRef.current = { x: event.clientX, y: event.clientY, pointer: event.pointerId };
   };
-  const resizeWindowFromEdge = (event: React.PointerEvent, direction: WindowResizeDirection) => {
-    if (event.button !== 0 || maximized || typeof window.imageBoard.startResizeDragging !== "function") return;
-    event.preventDefault(); event.stopPropagation(); titleDragRef.current = null;
-    void window.imageBoard.startResizeDragging(direction).then(refreshMaximized).catch((caught) => showError(caught instanceof Error ? caught.message : "调整窗口大小失败"));
-  };
   const toggleMaximize = async () => {
     if (maximizeBusy.current) return;
     maximizeBusy.current = true;
@@ -233,6 +228,55 @@ function App() {
     catch (caught) { showError(caught instanceof Error ? caught.message : "切换窗口大小失败"); }
     finally { maximizeBusy.current = false; }
   };
+  const [pinned, setPinned] = useState(false);
+  const togglePin = async () => {
+    try { setPinned(await window.imageBoard.toggleWindowPinned()); }
+    catch (caught) { showError(caught instanceof Error ? caught.message : "切换窗口置顶失败"); }
+  };
+  useEffect(() => {
+    if (typeof window.imageBoard.isWindowPinned !== "function") return;
+    void window.imageBoard.isWindowPinned().then(setPinned).catch(() => {});
+  }, []);
+  const maximizeButtonRef = useRef<HTMLButtonElement>(null);
+  const [snapFlyoutOpen, setSnapFlyoutOpen] = useState(false);
+  const snapHoverTimerRef = useRef<number | null>(null);
+  const openSnapFlyoutSoon = () => {
+    if (snapHoverTimerRef.current !== null) return;
+    snapHoverTimerRef.current = window.setTimeout(() => {
+      snapHoverTimerRef.current = null;
+      setSnapFlyoutOpen(true);
+    }, 420);
+  };
+  const cancelSnapFlyoutSoon = () => {
+    if (snapHoverTimerRef.current !== null) {
+      window.clearTimeout(snapHoverTimerRef.current);
+      snapHoverTimerRef.current = null;
+    }
+  };
+  const snapToZone = (zone: { x0: number; y0: number; x1: number; y1: number }) => {
+    setSnapFlyoutOpen(false);
+    void window.imageBoard.snapWindowToZone(zone).catch((caught) => showError(caught instanceof Error ? caught.message : "窗口贴靠失败"));
+  };
+  useEffect(() => {
+    if (typeof window.imageBoard.onWindowHideAnim !== "function" || typeof window.imageBoard.onWindowShownAnim !== "function") return;
+    let enterTimer: number | undefined;
+    let hideTimer: number | undefined;
+    const offHide = window.imageBoard.onWindowHideAnim(() => {
+      const root = document.documentElement;
+      root.classList.remove("app-window-entering");
+      root.classList.add("app-window-hiding");
+      window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => root.classList.remove("app-window-hiding"), 280);
+    });
+    const offShow = window.imageBoard.onWindowShownAnim(() => {
+      const root = document.documentElement;
+      root.classList.remove("app-window-hiding");
+      root.classList.add("app-window-entering");
+      window.clearTimeout(enterTimer);
+      enterTimer = window.setTimeout(() => root.classList.remove("app-window-entering"), 340);
+    });
+    return () => { offHide(); offShow(); window.clearTimeout(enterTimer); window.clearTimeout(hideTimer); };
+  }, []);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(busy);
   busyRef.current = busy;
@@ -1317,6 +1361,13 @@ function App() {
     void createNodeFromMenu(kind, target);
   }, [dockCreateTarget, createNodeFromMenu]);
 
+  /** Double click on empty canvas: create a rich-text node right there and open it for typing. */
+  const createTextNodeAtPoint = useCallback((clientX: number, clientY: number, point: CanvasPoint) => {
+    const canvasId = stateRef.current?.activeCanvasId;
+    if (!canvasId) return;
+    void createNodeFromMenu("richText", { canvasId, x: clientX, y: clientY, point });
+  }, [createNodeFromMenu]);
+
   /** A saved edit is a new board item, placed beside its source and revealed immediately. */
   const finishImageSave = useCallback(async (result: { state: AppState; contentId: string }) => {
     applyState(result.state);
@@ -1598,6 +1649,7 @@ function App() {
         onCardMenu={openCardMenu}
         onEdgeMenu={openEdgeMenu}
         onCanvasContextMenu={openCreateMenu}
+        onCreateAtPoint={createTextNodeAtPoint}
         onNodesMove={(positions) => void moveNodes(positions)}
         onNodesDrop={(nodeIds, cardId) => void moveNodesIntoCard(nodeIds, cardId)}
         onCardMove={moveCard}
@@ -1620,9 +1672,6 @@ function App() {
   );
 
   return <main ref={appShellRef} className={`app-shell${maximized ? " is-maximized" : ""}${viewMode === "canvas" ? " is-canvas-workspace" : ""}${page ? " has-content-page" : ""}`}>
-    {!maximized && <div className="window-resize-handles" aria-hidden="true">
-      {(["North", "NorthEast", "East", "SouthEast", "South", "SouthWest", "West", "NorthWest"] as WindowResizeDirection[]).map((direction) => <div key={direction} className={`window-resize-edge resize-${direction}`} data-resize-direction={direction} onPointerDown={(event) => resizeWindowFromEdge(event, direction)} />)}
-    </div>}
     <header className="topbar">
       <div className="topbar-start">
       <button
@@ -1696,15 +1745,20 @@ function App() {
         )}
       </div>
       </div>
+      <div ref={setWorkspaceToolbarHost} className="workspace-toolbar-host" />
       <div className="topbar-actions">
-
-        <button className="icon-button no-drag" aria-label={maximized ? "还原小窗" : "最大化窗口"} title={maximized ? "还原小窗" : "最大化窗口"} onClick={() => void toggleMaximize()}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">{maximized ? <><path d="M5 5V2h9v9h-3" /><rect x="2" y="5" width="9" height="9" rx="1" /></> : <rect x="2.5" y="2.5" width="11" height="11" rx="1" />}</svg></button>
-        <button className="icon-button no-drag" aria-label="最小化窗口" title="最小化窗口" onClick={() => void window.imageBoard.minimizeWindow()}><IconMinus size={15} /></button>
-        <button className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button>
+        <button type="button" className={`icon-button no-drag pin-window${pinned ? " active" : ""}`} aria-pressed={pinned} aria-label={pinned ? "取消窗口置顶" : "窗口置顶"} title={pinned ? "取消窗口置顶" : "窗口置顶"} onClick={() => void togglePin()}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+            <path d="M8.8 1.6 14.4 7.2 11.3 8.1 9 10.4 8.3 13.5 2.5 7.7 5.6 7 7.9 4.7 8.8 1.6Z" fill={pinned ? "currentColor" : "none"} />
+            {!pinned && <path d="M6.3 9.7 2.2 13.8" strokeLinecap="round" />}
+          </svg>
+        </button>
+        <button type="button" className="icon-button no-drag" aria-label="最小化窗口" title="最小化窗口" onClick={() => void window.imageBoard.minimizeWindow()}><IconMinus size={15} /></button>
+        <button type="button" ref={maximizeButtonRef} className="icon-button no-drag maximize-window" aria-label={maximized ? "还原小窗" : "最大化窗口"} title={maximized ? "还原小窗" : "最大化窗口"} onPointerEnter={openSnapFlyoutSoon} onPointerLeave={cancelSnapFlyoutSoon} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); setSnapFlyoutOpen(true); } }} onClick={() => { cancelSnapFlyoutSoon(); setSnapFlyoutOpen(false); void toggleMaximize(); }}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">{maximized ? <><path d="M5 5V2h9v9h-3" /><rect x="2" y="5" width="9" height="9" rx="1" /></> : <rect x="2.5" y="2.5" width="11" height="11" rx="1" />}</svg></button>
+        <button type="button" className="icon-button no-drag close-window" aria-label="关闭（按设置处理）" title="关闭（按设置处理）" onClick={() => void window.imageBoard.closeWindow()}><IconClose size={15} /></button>
       </div>
       {busy && <span className="busy-chip" role="status"><span className="busy-chip-dot" aria-hidden="true" />{busyLabel ?? "正在处理…"}</span>}
     </header>
-    <div ref={setWorkspaceToolbarHost} className="workspace-toolbar-host" />
     <div className="workspace">
       <aside
         id="workspace-sidebar" aria-label="工作区侧边栏" className={`sidebar${sidebarPinned ? " is-pinned" : sidebarPeek ? " is-peeking" : " closed"}`}
@@ -1870,6 +1924,28 @@ function App() {
       } : null}
       onClose={() => setTopbarMenu(null)}
     />
+    <Popover
+      open={snapFlyoutOpen}
+      anchor={maximizeButtonRef.current}
+      align="end"
+      width={218}
+      className="snap-flyout"
+      onClose={() => setSnapFlyoutOpen(false)}
+      panelProps={{ role: "dialog", "aria-label": "窗口贴靠布局" }}
+    >
+      <div className="snap-flyout-grid">
+        <div className="snap-card" role="group" aria-label="左右分屏">
+          <button type="button" className="snap-cell span-half" style={{ gridColumn: "1 / 2" }} aria-label="贴靠到左半屏" onClick={() => snapToZone({ x0: 0, y0: 0, x1: 0.5, y1: 1 })} />
+          <button type="button" className="snap-cell span-half" style={{ gridColumn: "2 / 3" }} aria-label="贴靠到右半屏" onClick={() => snapToZone({ x0: 0.5, y0: 0, x1: 1, y1: 1 })} />
+        </div>
+        <div className="snap-card snap-card-quads" role="group" aria-label="四分格">
+          <button type="button" className="snap-cell" aria-label="贴靠到左上四分格" onClick={() => snapToZone({ x0: 0, y0: 0, x1: 0.5, y1: 0.5 })} />
+          <button type="button" className="snap-cell" aria-label="贴靠到右上四分格" onClick={() => snapToZone({ x0: 0.5, y0: 0, x1: 1, y1: 0.5 })} />
+          <button type="button" className="snap-cell" aria-label="贴靠到左下四分格" onClick={() => snapToZone({ x0: 0, y0: 0.5, x1: 0.5, y1: 1 })} />
+          <button type="button" className="snap-cell" aria-label="贴靠到右下四分格" onClick={() => snapToZone({ x0: 0.5, y0: 0.5, x1: 1, y1: 1 })} />
+        </div>
+      </div>
+    </Popover>
     <ToastView toast={toast} onClose={clearToast} />
     {dialogPresence.mounted && shownDialog && <Dialog dialog={shownDialog} motion={dialogPresence.phase} onClose={clearDialog} />}
   </main>;

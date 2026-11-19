@@ -81,6 +81,9 @@ pub struct DesktopPreferences {
     /// moves the expanded window for the first time.
     #[serde(default)]
     pub window_bounds: Option<SavedWindowBounds>,
+    /// Titlebar pin (always-on-top) choice for the main window.
+    #[serde(default)]
+    pub main_window_pinned: bool,
 }
 
 fn default_snap_to_grid() -> bool {
@@ -101,6 +104,7 @@ impl Default for DesktopPreferences {
             snap_to_grid: false,
             grid_size: GridSize::default(),
             window_bounds: None,
+            main_window_pinned: false,
         }
     }
 }
@@ -294,6 +298,7 @@ mod tests {
                 height: 640,
                 monitor: Some("DISPLAY".into()),
             }),
+            main_window_pinned: false,
         };
 
         save(&root, &preferences).unwrap();

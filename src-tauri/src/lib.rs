@@ -317,6 +317,23 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // own action; quit lets the window close naturally.
     crate::desktop::install_close_behavior(&window)?;
 
+    // Global hotkey: summon/dismiss the main window from anywhere. A conflict
+    // (another app owns the combo) degrades to "no hotkey", never a crash.
+    {
+        use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+        if let Err(error) = app.global_shortcut().on_shortcut("ctrl+shift+space", |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                if let Some(controller) = app.try_state::<crate::window_controller::WindowController>() {
+                    if let Err(error) = controller.toggle_main_visibility() {
+                        eprintln!("[shortcut] toggle failed: {error}");
+                    }
+                }
+            }
+        }) {
+            eprintln!("[shortcut] global hotkey unavailable: {error}");
+        }
+    }
+
     // Image ingestion may do file IO/decoding. Only enable its worker after
     // both webviews, placement/readiness and close behavior are installed.
     app.state::<image_files::PendingImage>().mark_setup_ready();
@@ -353,6 +370,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| image_files::receive_args(app, args, cwd)))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap_preferences,
@@ -400,6 +418,9 @@ pub fn run() {
             commands::start_titlebar_drag,
             commands::start_resize_dragging,
             commands::is_maximized,
+            commands::is_window_pinned,
+            commands::toggle_window_pinned,
+            commands::snap_window_to_zone,
             commands::close_window,
             commands::get_desktop_settings,
             commands::set_desktop_settings,

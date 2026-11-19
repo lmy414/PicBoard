@@ -22,8 +22,23 @@ import { patternInk, type CanvasAppearance } from "./canvas-appearance";
 import { EdgeLayer, type EdgeLayerHandle } from "./EdgeLayer";
 import { MiniMap } from "./MiniMap";
 
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 1.5;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 2.0;
+/** Detent stops the wheel and the dock buttons settle on (100% is one of them). */
+const ZOOM_DETENTS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const ZOOM_DETENT_TOLERANCE = 0.04;
+const snapZoomDetents = (value: number): number => {
+  let snapped = value;
+  let bestDelta = ZOOM_DETENT_TOLERANCE;
+  for (const detent of ZOOM_DETENTS) {
+    const delta = Math.abs(value - detent);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      snapped = detent;
+    }
+  }
+  return snapped;
+};
 /** Relocation FLIP and item-exit durations (CSS exit is 120 ms). */
 const FLIP_MS = 240;
 const EXIT_MS = 140;
@@ -72,6 +87,8 @@ export interface CanvasStageProps {
   onEdgeMenu(edgeId: string, clientX: number, clientY: number): void;
   /** Right click on genuinely empty canvas space; nodes, cards, edges and the mini-map never call it. */
   onCanvasContextMenu(clientX: number, clientY: number): void;
+  /** Double click on empty canvas: create and open a node right at the point. */
+  onCreateAtPoint(clientX: number, clientY: number, point: CanvasPoint): void;
   onNodesMove(positions: Array<{ id: string; x: number; y: number }>): void;
   onNodesDrop(nodeIds: string[], cardId: string): void;
   onCardMove(canvasId: string, frame: CanvasFrame): void;
@@ -87,6 +104,8 @@ interface PanSession {
   startY: number;
   originX: number;
   originY: number;
+  /** Recent pointer samples for the release-inertia glide (time in ms). */
+  samples: Array<{ t: number; x: number; y: number }>;
 }
 
 interface SelectSession {
@@ -94,6 +113,8 @@ interface SelectSession {
   start: CanvasPoint;
   additive: boolean;
   rect: SelectionRect | null;
+  /** Node ids currently ring-highlighted under the elastic rect. */
+  hits: Set<string>;
 }
 
 interface NodeDragSession {
@@ -215,6 +236,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const resizeAnchorXRef = useRef<"center" | "right">("center");
   const glideRef = useRef<{ raf: number; targetOffset: { x: number; y: number }; targetZoom: number } | null>(null);
   const interactionRef = useRef(false);
+  /** Node ids seen on this surface, for detecting batch enters (paste stagger). */
+  const knownNodesRef = useRef(new Set<string>());
 
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -412,6 +435,25 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         if (element) moves.push({ key, element, dx: spawn.point.x - node.x, dy: spawn.point.y - node.y });
       }
     }
+    // Batch-entered nodes (a multi-item paste) stagger their mount pop-in;
+    // single spawns glide from `spawnFrom` instead.
+    const known = knownNodesRef.current;
+    if (known.size > 0) {
+      let freshIndex = 0;
+      for (const node of nodes) {
+        if (known.has(node.id)) continue;
+        const element = nodeElements.current.get(node.id);
+        if (element) {
+          if (freshIndex > 0) {
+            element.style.animationDelay = `${Math.min(freshIndex, 10) * 30}ms`;
+            element.addEventListener("animationend", () => { element.style.animationDelay = ""; }, { once: true });
+          }
+          freshIndex += 1;
+        }
+      }
+    }
+    known.clear();
+    for (const node of nodes) known.add(node.id);
     displayedRef.current = next;
     if (interactionRef.current || moves.length === 0) return;
     clearFlip();
@@ -489,7 +531,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       const rect = viewport.getBoundingClientRect();
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1);
       const baseZoom = glideRef.current?.targetZoom ?? zoomRef.current;
-      const nextZoom = clampZoom(baseZoom * Math.exp(-Math.max(-300, Math.min(300, delta)) * 0.0015));
+      const nextZoom = snapZoomDetents(clampZoom(baseZoom * Math.exp(-Math.max(-300, Math.min(300, delta)) * 0.0015)));
       if (nextZoom === baseZoom) return;
       const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
       const baseOffset = glideRef.current?.targetOffset ?? offsetRef.current;
@@ -528,7 +570,10 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       release(viewportRef.current, pan.pointerId);
       commitViewport(offsetRef.current, zoomRef.current);
     }
-    if (select) release(viewportRef.current, select.pointerId);
+    if (select) {
+      for (const id of select.hits) nodeElements.current.get(id)?.classList.remove("select-hover");
+      release(viewportRef.current, select.pointerId);
+    }
     if (node) {
       if (node.cardId) cardElements.current.get(node.cardId)?.classList.remove("card-hover");
       for (const item of node.moving) {
@@ -801,7 +846,13 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     }
     for (const item of drag.moving) {
       const target = nodeElements.current.get(item.id);
-      if (target) target.style.translate = "";
+      if (target) {
+        target.style.translate = "";
+        if (commit && drag.moved) {
+          target.classList.add("drag-release");
+          target.addEventListener("animationend", () => target.classList.remove("drag-release"), { once: true });
+        }
+      }
     }
     if (!commit) return;
     if (drag.moved) {
@@ -979,6 +1030,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       startY: event.clientY,
       originX: offsetRef.current.x,
       originY: offsetRef.current.y,
+      samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
     };
     suppressPanClickRef.current = true;
     if (!capturePointer(viewportRef.current, event.pointerId)) {
@@ -999,7 +1051,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     event.stopPropagation();
     const start = worldPointFromClient(event.clientX, event.clientY);
     if (!start) return;
-    selectRef.current = { pointerId: event.pointerId, start, additive: event.shiftKey, rect: null };
+    selectRef.current = { pointerId: event.pointerId, start, additive: event.shiftKey, rect: null, hits: new Set() };
     if (!capturePointer(viewportRef.current, event.pointerId)) {
       selectRef.current = null;
       setSelectionRect(null);
@@ -1012,6 +1064,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const viewportPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const pan = panRef.current;
     if (pan && pan.pointerId === event.pointerId) {
+      pan.samples.push({ t: performance.now(), x: event.clientX, y: event.clientY });
+      if (pan.samples.length > 6) pan.samples.shift();
       applyWorldTransform({
         x: pan.originX + event.clientX - pan.startX,
         y: pan.originY + event.clientY - pan.startY,
@@ -1025,6 +1079,17 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     const rect = normalizeSelectionRect(select.start, end);
     select.rect = rect;
     setSelectionRect(rect);
+    // Live ring on the nodes the elastic rect currently covers.
+    const hits = new Set(rect && (rect.width > 3 || rect.height > 3)
+      ? itemsInSelectionRect(nodes, rect)
+      : []);
+    for (const id of hits) {
+      if (!select.hits.has(id)) nodeElements.current.get(id)?.classList.add("select-hover");
+    }
+    for (const id of select.hits) {
+      if (!hits.has(id)) nodeElements.current.get(id)?.classList.remove("select-hover");
+    }
+    select.hits = hits;
   };
 
   const finishViewportGesture = (event: React.PointerEvent<HTMLDivElement>, commit: boolean) => {
@@ -1033,9 +1098,38 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       panRef.current = null;
       if (viewportRef.current?.hasPointerCapture(event.pointerId)) viewportRef.current.releasePointerCapture(event.pointerId);
       setPanning(false);
-      // Navigation is safe to retain on pointercancel/lost capture as well;
-      // publishing it keeps React, the mini-map and persistence in agreement.
-      commitViewport(offsetRef.current, zoomRef.current);
+      if (!commit) {
+        commitViewport(offsetRef.current, zoomRef.current);
+        syncBusy();
+        return;
+      }
+      // Release inertia: project the last samples forward and glide there
+      // (the glide commits the viewport when it settles).
+      const samples = pan.samples;
+      let velocity = { x: 0, y: 0 };
+      if (samples.length >= 2) {
+        const last = samples[samples.length - 1];
+        let first = samples[0];
+        for (const sample of samples) {
+          if (last.t - sample.t >= 50) first = sample;
+        }
+        const dt = Math.max(1, last.t - first.t);
+        velocity = { x: (last.x - first.x) / dt, y: (last.y - first.y) / dt };
+      }
+      const speed = Math.hypot(velocity.x, velocity.y);
+      const current = offsetRef.current;
+      if (speed > 0.25 && !reducedMotion()) {
+        let dx = velocity.x * 220;
+        let dy = velocity.y * 220;
+        const drift = Math.hypot(dx, dy);
+        if (drift > 560) {
+          dx *= 560 / drift;
+          dy *= 560 / drift;
+        }
+        beginGlide({ x: current.x + dx, y: current.y + dy }, zoomRef.current);
+      } else {
+        commitViewport(current, zoomRef.current);
+      }
       syncBusy();
       return;
     }
@@ -1043,6 +1137,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     if (!select || select.pointerId !== event.pointerId) return;
     selectRef.current = null;
     setSelectionRect(null);
+    for (const id of select.hits) nodeElements.current.get(id)?.classList.remove("select-hover");
+    select.hits.clear();
     if (viewportRef.current?.hasPointerCapture(event.pointerId)) viewportRef.current.releasePointerCapture(event.pointerId);
     syncBusy();
     if (!commit) return;
@@ -1065,7 +1161,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
 
   const zoomBy = (delta: number) => {
     const currentZoom = glideRef.current?.targetZoom ?? zoomRef.current;
-    const nextZoom = Math.round(clampZoom(currentZoom + delta) * 10) / 10;
+    const nextZoom = snapZoomDetents(clampZoom(currentZoom + delta));
     if (nextZoom === currentZoom) return;
     const rect = viewportRef.current?.getBoundingClientRect();
     const centerX = rect ? rect.width / 2 : 320;
@@ -1207,6 +1303,14 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       onPointerDown={viewportPointerDown}
       onClickCapture={suppressPanActivation}
       onDoubleClickCapture={suppressPanActivation}
+      onDoubleClick={(event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (target?.closest(".canvas-node, .canvas-node-card, .mini-map, .edge-hit, input, textarea, select, [contenteditable], .ProseMirror")) return;
+        if (propsRef.current.busy || panRef.current || selectRef.current || nodeDragRef.current || cardDragRef.current || connectRef.current) return;
+        const point = worldPointFromClient(event.clientX, event.clientY);
+        if (!point) return;
+        propsRef.current.onCreateAtPoint(event.clientX, event.clientY, point);
+      }}
       onPointerMove={viewportPointerMove}
       onPointerUp={(event) => finishViewportGesture(event, true)}
       onPointerCancel={(event) => finishViewportGesture(event, false)}
