@@ -14,6 +14,7 @@ import type {
 } from "../../shared/image-board";
 import { applySelection, mergeSelection } from "../../shared/canvas-selection";
 import { readCanvasAppearance, saveCanvasAppearance, type CanvasAppearance } from "./canvas/canvas-appearance";
+import { CanvasSelectionToolbar } from "./canvas/CanvasSelectionToolbar";
 import { CanvasStage, type CanvasStageHandle } from "./canvas/CanvasStage";
 import { contentTitle, isHttpUrl } from "./content/content-meta";
 import { HistoryDrawer } from "./history/HistoryDrawer";
@@ -30,6 +31,7 @@ import { ToastView, toastChannel, type ToastChannel, type ToastKind, type ToastM
 import { usePresence } from "./ui/motion";
 import { SIDEBAR_WIDTH, drawerLayout as drawerLayoutBucket } from "./ui/breakpoints";
 import { useWindowLayout } from "./ui/use-breakpoints";
+import { Button, Input } from "./ui/coss/Primitives";
 
 type ViewMode = "canvas" | "library" | "settings";
 type DialogState = (
@@ -47,6 +49,7 @@ const SIDEBAR_COLLAPSED_KEY = "quick-image-board.sidebar-collapsed";
 /** Time the pointer may cross the gap between the toggle and its peek panel. */
 const SIDEBAR_PEEK_GRACE_MS = 170;
 const HISTORY_OPEN_KEY = "quick-image-board.history-open";
+const MINIMAP_VISIBILITY_KEY = "quick-image-board.minimap-visible";
 const DEFAULT_PATH_SETTINGS: PathSettings = { filePath: "quick-image-board" };
 const FALLBACK_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 };
 function readPathSettings(): PathSettings {
@@ -64,6 +67,17 @@ function readSidebarPinned(): boolean | null {
   } catch { return null; }
 }
 
+function readMinimapPreference(): boolean | null {
+  try {
+    const value = window.localStorage.getItem(MINIMAP_VISIBILITY_KEY);
+    if (value === "1") return true;
+    if (value === "0") return false;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function isEditableTarget(target: EventTarget | null) {
   const element = target instanceof HTMLElement ? target : null;
   return Boolean(element?.isContentEditable || element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .ProseMirror'));
@@ -73,10 +87,10 @@ function isEditableTarget(target: EventTarget | null) {
 function AppLogo({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden="true">
-      <rect x="1.5" y="1.5" width="25" height="25" rx="7" fill="var(--accent)" />
-      <rect x="7.5" y="8" width="13" height="3" rx="1.5" fill="#fff" opacity=".9" />
-      <rect x="7.5" y="13" width="13" height="3" rx="1.5" fill="#fff" opacity=".62" />
-      <rect x="7.5" y="18" width="8.5" height="3" rx="1.5" fill="#fff" opacity=".35" />
+      <rect x="1.5" y="1.5" width="25" height="25" rx="7" fill="var(--action-fill)" />
+      <rect x="7.5" y="8" width="13" height="3" rx="1.5" fill="var(--action-ink)" opacity=".9" />
+      <rect x="7.5" y="13" width="13" height="3" rx="1.5" fill="var(--action-ink)" opacity=".62" />
+      <rect x="7.5" y="18" width="8.5" height="3" rx="1.5" fill="var(--action-ink)" opacity=".35" />
     </svg>
   );
 }
@@ -98,6 +112,8 @@ function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const sidebarSearchFocusPendingRef = useRef(false);
   const [showControls, setShowControls] = useState(true);
+  const [minimapPreference, setMinimapPreference] = useState(readMinimapPreference);
+  const [minimapByDefault, setMinimapByDefault] = useState(false);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
   const [pathSettings, setPathSettings] = useState<PathSettings>(() => readPathSettings());
   const [canvasAppearance, setCanvasAppearance] = useState<CanvasAppearance>(() => readCanvasAppearance(window.localStorage));
@@ -170,6 +186,9 @@ function App() {
   // workspace-main, which oscillated docked<->overlay on every frame. A hover
   // peek floats over the workspace and therefore claims no width.
   const drawerLayout = drawerLayoutBucket(window.innerWidth - (sidebarPinned ? SIDEBAR_WIDTH : 0));
+  const historyVisible = historyOpen && (drawerLayout === "docked" || !sidebarPeek);
+  const historyOverlay = drawerLayout === "overlay" && historyVisible;
+  const minimapVisible = minimapPreference ?? (minimapByDefault && !historyOverlay);
   const [topbarMenu, setTopbarMenu] = useState<{ x: number; y: number } | null>(null);
   const viewportTimersRef = useRef(new Map<string, number>());
   const gestureBusyRef = useRef(false);
@@ -352,23 +371,20 @@ function App() {
   }, [activeCanvas, selectedNodeIds]);
   const canvasContentIdsRef = useRef(canvasContentIds);
   canvasContentIdsRef.current = canvasContentIds;
-  const selectableContentIds = viewMode === "canvas" ? canvasContentIds : selectedContentIds;
-
   // Selection toolbar / canvas toolbar keep their last content mounted through
   // the exit; pointer input is disabled by the motion preset.
-  const selectionOpen = !actions && !page
-    && (selectedNodeIds.length > 0
-      || selectedEdgeIds.length > 0
-      || (viewMode === "library" && selectedContentIds.length > 0));
+  const selectionOpen = viewMode === "canvas" && !actions && !page
+    && (selectedNodeIds.length > 0 || selectedEdgeIds.length > 0);
   const selectionSnapshotRef = useRef({ label: "", canGroup: false, canAct: false });
   if (selectionOpen) {
-    const label = viewMode === "library"
-      ? `已选 ${selectedContentIds.length} 项`
-      : [selectedNodeIds.length > 0 ? `${selectedNodeIds.length} 个节点` : "", selectedEdgeIds.length > 0 ? `${selectedEdgeIds.length} 条连线` : ""].filter(Boolean).join(" · ").replace(/^/, "已选 ");
+    const selected = [
+      selectedNodeIds.length > 0 ? `${selectedNodeIds.length} 个节点` : "",
+      selectedEdgeIds.length > 0 ? `${selectedEdgeIds.length} 条连线` : "",
+    ].filter(Boolean).join(" · ");
     selectionSnapshotRef.current = {
-      label,
-      canGroup: viewMode === "canvas" && selectedNodeIds.length > 0,
-      canAct: selectableContentIds.length > 0,
+      label: `已选 ${selected}`,
+      canGroup: selectedNodeIds.length > 0,
+      canAct: canvasContentIds.length > 0,
     };
   }
   const selectionPresence = usePresence(selectionOpen, 140);
@@ -486,11 +502,19 @@ function App() {
     try { window.localStorage.setItem(HISTORY_OPEN_KEY, historyOpen ? "1" : "0"); } catch { /* local preference storage is optional */ }
   }, [historyOpen]);
   useEffect(() => {
+    if (minimapPreference === null) return;
+    try {
+      window.localStorage.setItem(MINIMAP_VISIBILITY_KEY, minimapPreference ? "1" : "0");
+    } catch {
+      return;
+    }
+  }, [minimapPreference]);
+  useEffect(() => {
     const slot = historySlotRef.current;
     if (!slot) return;
-    if (historyOpen && !page) slot.removeAttribute("inert");
+    if (historyVisible && !page) slot.removeAttribute("inert");
     else slot.setAttribute("inert", "");
-  }, [historyOpen, viewMode, page]);
+  }, [historyVisible, viewMode, page]);
   // The full page covers the workspace: keep the underlay out of focus/tab order.
   useEffect(() => {
     const view = workspaceViewRef.current;
@@ -927,9 +951,8 @@ function App() {
     openContentActions("history", [contentId], [], anchorAt(event.clientX, event.clientY));
   }, [openContentActions]);
 
-  const openToolbarActions = useCallback(() => {
-    const anchor = anchorForElement(document.querySelector<HTMLElement>(".selection-toolbar"));
-    openContentActions(viewModeRef.current === "library" ? "library" : "canvas", viewModeRef.current === "library" ? selectedContentIdsRef.current : canvasContentIdsRef.current, viewModeRef.current === "library" ? [] : selectedNodeIdsRef.current, anchor);
+  const openToolbarActions = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    openContentActions("canvas", canvasContentIdsRef.current, selectedNodeIdsRef.current, anchorForElement(event.currentTarget));
   }, [openContentActions]);
 
   // ---- dialogs ---------------------------------------------------------------
@@ -1542,7 +1565,7 @@ function App() {
       if (event.key === "Escape") {
         // The create menu owns this Escape: its own listener closes it without
         // also clearing the selection or stepping out of a sub-canvas.
-        if (createMenuRef.current) return;
+        if (createMenuRef.current || document.querySelector('[data-esc-layer]:not([data-motion="exit"])')) return;
         if (selectedNodeIdsRef.current.length > 0 || selectedContentIdsRef.current.length > 0 || selectedEdgeIdsRef.current.length > 0 || selectedCardIdRef.current) {
           event.preventDefault();
           clearSelection();
@@ -1602,19 +1625,19 @@ function App() {
       </div>}
       <div className="sidebar-search">
         <IconSearch size={14} />
-        <input ref={searchInputRef} value={viewMode === "settings" ? settingsQuery : treeQuery} placeholder={viewMode === "settings" ? "搜索设置…" : "搜索画布…"} aria-label={viewMode === "settings" ? "搜索设置" : "搜索画布"} onChange={(event) => (viewMode === "settings" ? setSettingsQuery : setTreeQuery)(event.target.value)} onKeyDown={(event) => { if (event.key !== "Escape" || event.nativeEvent.isComposing) return; event.preventDefault(); event.stopPropagation(); if (viewMode === "settings" ? settingsQuery : treeQuery) { (viewMode === "settings" ? setSettingsQuery : setTreeQuery)(""); return; } if (!sidebarPinnedRef.current) dismissSidebar(); else event.currentTarget.blur(); }} />
+        <Input ref={searchInputRef} value={viewMode === "settings" ? settingsQuery : treeQuery} placeholder={viewMode === "settings" ? "搜索设置…" : "搜索画布…"} aria-label={viewMode === "settings" ? "搜索设置" : "搜索画布"} onChange={(event) => (viewMode === "settings" ? setSettingsQuery : setTreeQuery)(event.target.value)} onKeyDown={(event) => { if (event.key !== "Escape" || event.nativeEvent.isComposing) return; event.preventDefault(); event.stopPropagation(); if (viewMode === "settings" ? settingsQuery : treeQuery) { (viewMode === "settings" ? setSettingsQuery : setTreeQuery)(""); return; } if (!sidebarPinnedRef.current) dismissSidebar(); else event.currentTarget.blur(); }} />
         {(sidebarPinned || viewMode === "settings") && (viewMode === "settings" ? settingsQuery : treeQuery) === "" && <kbd>Ctrl K</kbd>}
         {viewMode !== "settings" && !sidebarPinned && sidebarActions}
       </div>
       {viewMode === "settings" ? <SettingsNavigation section={settingsSection} onSectionChange={(section) => { setSettingsSection(section); cancelPeekClose(); }} query={settingsQuery} /> : <nav className="sidebar-nav" aria-label="工作区导航">
-        <button className={viewMode === "canvas" ? "active" : undefined} onClick={() => switchView("canvas")}><IconGrid size={15} />画布</button>
-        <button className={viewMode === "library" ? "active" : undefined} onClick={() => switchView("library")}><IconFolder size={15} />分类库</button>
+        <Button className={viewMode === "canvas" ? "active" : undefined} aria-current={viewMode === "canvas" ? "page" : undefined} onClick={() => switchView("canvas")}><IconGrid size={15} />画布</Button>
+        <Button className={viewMode === "library" ? "active" : undefined} aria-current={viewMode === "library" ? "page" : undefined} onClick={() => switchView("library")}><IconFolder size={15} />分类库</Button>
       </nav>}
       {viewMode === "canvas" && <CanvasTree canvases={state.canvases} activeCanvasId={state.activeCanvasId} query={treeQuery} onEnter={(canvasId) => void changeCanvas(canvasId)} onCreateRoot={() => { clearSelection(); void update(() => window.imageBoard.createCanvas()); }} onCreateChild={(parentId) => { clearSelection(); void update(() => window.imageBoard.createCanvas(parentId)); }} onRename={(canvasId) => void renameCanvasById(canvasId)} onDelete={(canvasId) => void deleteCanvas(canvasId)} onUngroup={ungroupCanvasById} onMove={moveCanvasNode} />}
       <footer className="sidebar-footer">
         <div className="footer-avatar"><AppLogo size={20} /></div>
         <div className="footer-copy"><strong>PicBoard 本地工作区</strong><span>{state.canvases.length} 个画布 · {contentCount} 项内容</span></div>
-        <button type="button" className={`icon-button sidebar-settings${viewMode === "settings" ? " active" : ""}`} aria-label="打开设置" title="设置" aria-pressed={viewMode === "settings"} onClick={() => switchView("settings")}><IconGear size={16} /></button>
+        <Button size="icon" className={`icon-button sidebar-settings${viewMode === "settings" ? " active" : ""}`} aria-label="打开设置" title="设置" aria-pressed={viewMode === "settings"} onClick={() => switchView("settings")}><IconGear size={16} /></Button>
       </footer>
     </>
   );
@@ -1657,13 +1680,16 @@ function App() {
         onViewport={(viewport) => persistViewport(activeCanvas.id, viewport)}
         onZoomChange={setZoomDisplay}
         onInteractionChange={handleInteractionChange}
+        minimapVisible={minimapVisible}
+        onMinimapDefaultChange={setMinimapByDefault}
       />
-      {canvasToolbarPresence.mounted && <div className={`canvas-dock-motion motion-fade${drawerLayout === "overlay" && historyOpen ? " has-overlay-history" : ""}`} data-motion={canvasToolbarPresence.phase}>
+      {canvasToolbarPresence.mounted && <div className={`canvas-dock-motion motion-fade${historyOverlay ? " has-overlay-history" : ""}`} data-motion={canvasToolbarPresence.phase}>
         <CanvasDock tool={canvasTool} onToolChange={setCanvasTool} onCreate={createNodeFromDock} onImportImage={() => void importImageToCanvas()}
           onCreateCanvas={() => { clearSelection(); void update(() => window.imageBoard.createCanvas(activeCanvas.id)); }}
-          historyOpen={historyOpen} onToggleHistory={() => setHistoryOpen((open) => !open)}
+          historyOpen={historyVisible} onToggleHistory={() => { closePeek(); setHistoryOpen(!historyVisible); }}
           snapToGrid={snapToGrid} onToggleSnap={toggleSnap} zoom={zoomDisplay} onZoom={(delta) => stageRef.current?.zoomBy(delta)}
           onLocateAll={() => { if (!stageRef.current?.locateAll()) showInfo("当前画布还没有节点"); }}
+          minimapVisible={minimapVisible} onToggleMinimap={() => setMinimapPreference(!minimapVisible)}
           showViewControls={showControls} disabled={busy} />
       </div>}
     </>
@@ -1788,7 +1814,7 @@ function App() {
         <div ref={attachSidebarContent} className="sidebar-content">{sidebarInner}</div>
       </aside>
       <div ref={workspaceMainRef} className="workspace-main">
-        <div ref={workspaceViewRef} className={`workspace-view${drawerLayout === "overlay" && historyOpen ? " has-history-overlay" : ""}`} aria-hidden={page ? true : undefined}>
+        <div ref={workspaceViewRef} className={`workspace-view${historyOverlay ? " has-history-overlay" : ""}`} aria-hidden={page ? true : undefined}>
           {viewMode === "canvas" ? canvasView
             : viewMode === "library" ? (
               <LibraryView
@@ -1818,22 +1844,22 @@ function App() {
                 onAddCategory={async () => { const name = await openPrompt("新建分类"); if (!name) return false; return update(() => window.imageBoard.createCategory(name)); }}
               />
             )}
-          {viewMode !== "library" && selectionPresence.mounted && selectionSnapshotRef.current.label !== "" && (
-            <div className={`selection-toolbar motion-fade`} data-motion={selectionPresence.phase}>
+          {viewMode === "canvas" && selectionPresence.mounted && selectionSnapshotRef.current.label !== "" && (
+            <CanvasSelectionToolbar nodeIds={selectedNodeIds} edgeIds={selectedEdgeIds} open={selectionOpen} motion={selectionPresence.phase}>
               <span>{selectionSnapshotRef.current.label}</span>
               {selectionSnapshotRef.current.canGroup && (
-                <button onClick={() => void groupSelectionIntoCanvas(selectedNodeIds)}>创建子画布</button>
+                <Button size="sm" onClick={() => void groupSelectionIntoCanvas(selectedNodeIds)}>创建子画布</Button>
               )}
-              {selectionSnapshotRef.current.canAct && <button onClick={openToolbarActions}>操作</button>}
-              <button onClick={clearSelection}>取消选择</button>
-            </div>
+              {selectionSnapshotRef.current.canAct && <Button size="sm" onClick={openToolbarActions}>操作</Button>}
+              <Button size="sm" onClick={clearSelection}>取消选择</Button>
+            </CanvasSelectionToolbar>
           )}
         </div>
         {viewMode === "canvas" && (
-          <div ref={historySlotRef} className={`history-slot${historyOpen ? " open" : ""}${drawerLayout === "overlay" ? " overlay" : ""}`} aria-hidden={page ? true : undefined}>
+          <div ref={historySlotRef} className={`history-slot${historyVisible ? " open" : ""}${drawerLayout === "overlay" ? " overlay" : ""}`} aria-hidden={page ? true : undefined}>
             <HistoryDrawer
               state={state}
-              open={historyOpen}
+              open={historyVisible}
               captureEnabled={captureEnabled}
               onToggleCapture={(next) => void toggleCapture(next)}
               onClose={() => setHistoryOpen(false)}
@@ -2057,9 +2083,10 @@ function Dialog({ dialog, motion, onClose }: { dialog: DialogState; motion: "ent
       <strong>{dialog.title}</strong>
       {dialog.kind === "prompt" ? (
         <>
-          <input
+          <Input
             ref={inputRef}
             value={value}
+            aria-label={dialog.title}
             aria-invalid={validationMessage ? "true" : undefined}
             onChange={(event) => { setValue(event.target.value); setValidation(null); }}
             onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") submit(); if (event.key === "Escape") finish(null); }}
@@ -2068,8 +2095,8 @@ function Dialog({ dialog, motion, onClose }: { dialog: DialogState; motion: "ent
         </>
       ) : <p>{dialog.message}</p>}
       <div className="dialog-actions">
-        <button ref={cancelRef} onClick={() => finish(dialog.kind === "prompt" ? null : false)}>取消</button>
-        <button className={dialog.kind === "confirm" ? "danger-button" : "primary-button"} onClick={submit}>{dialog.kind === "confirm" ? "删除" : "确定"}</button>
+        <Button ref={cancelRef} variant="outline" onClick={() => finish(dialog.kind === "prompt" ? null : false)}>取消</Button>
+        <Button variant={dialog.kind === "confirm" ? "destructive" : "default"} onClick={submit}>{dialog.kind === "confirm" ? "删除" : "确定"}</Button>
       </div>
     </section>
   </div>;

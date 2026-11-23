@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppState, ContentRecord } from '../../../shared/image-board';
 import { ColorPicker } from '../ui/ColorPicker';
+import { Button, Input } from '../ui/coss/Primitives';
 import type { ContentPageApi } from './page-types';
 import { compositeImageLayers, encodeImage, imageRect, renderImageEditLayers, type ImageAnnotation, type ImageEdit, type ImageEditLayers, type ImageFormat, type ImagePoint, type ImageRect } from './image-editing';
 import './image-editor.css';
@@ -210,30 +211,30 @@ export function ImageEditor(props: Props) {
     <div ref={dockRef} className="ime-dock">
       <div className="ime-toolbar" aria-label="图像编辑工具" role="toolbar">
         <div className="ime-capsule ime-tools" role="group" aria-label="绘图工具">
-          {TOOLS.map(([id, label]) => <button type="button" className="ime-icon-button" key={id} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => { cancelPointer(); setTool(id); setCrop(null); setEraserPoint(null); }} disabled={locked}><EditorIcon name={id} /></button>)}
+          {TOOLS.map(([id, label]) => <Button size="icon-sm" className="ime-icon-button" key={id} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => { cancelPointer(); setTool(id); setCrop(null); setEraserPoint(null); }} disabled={locked}><EditorIcon name={id} /></Button>)}
         </div>
         <div className="ime-capsule" role="group" aria-label="历史与变换">
-          <button type="button" className="ime-icon-button" aria-label="撤销" title="撤销" onClick={() => { setCursor((value) => value - 1); setCrop(null); }} disabled={cursor === 0 || busy}><EditorIcon name="undo" /></button>
-          <button type="button" className="ime-icon-button" aria-label="重做" title="重做" onClick={() => { setCursor((value) => value + 1); setCrop(null); }} disabled={cursor === history.length || busy}><EditorIcon name="redo" /></button>
+          <Button size="icon-sm" className="ime-icon-button" aria-label="撤销" title="撤销" onClick={() => { setCursor((value) => value - 1); setCrop(null); }} disabled={cursor === 0 || busy}><EditorIcon name="undo" /></Button>
+          <Button size="icon-sm" className="ime-icon-button" aria-label="重做" title="重做" onClick={() => { setCursor((value) => value + 1); setCrop(null); }} disabled={cursor === history.length || busy}><EditorIcon name="redo" /></Button>
           <span className="ime-divider" />
-          <button type="button" className="ime-icon-button" aria-label="旋转" title="顺时针旋转 90°" onClick={() => commit({ kind: 'rotate' })} disabled={locked}><EditorIcon name="rotate" /></button>
-          <button type="button" className="ime-icon-button" aria-label="翻转" title="水平翻转" onClick={() => commit({ kind: 'flip' })} disabled={locked}><EditorIcon name="flip" /></button>
+          <Button size="icon-sm" className="ime-icon-button" aria-label="旋转" title="顺时针旋转 90°" onClick={() => commit({ kind: 'rotate' })} disabled={locked}><EditorIcon name="rotate" /></Button>
+          <Button size="icon-sm" className="ime-icon-button" aria-label="翻转" title="水平翻转" onClick={() => commit({ kind: 'flip' })} disabled={locked}><EditorIcon name="flip" /></Button>
         </div>
         {(tool !== 'crop' || crop) && <div className="ime-capsule ime-properties" role="group" aria-label="工具属性">
           {tool !== 'eraser' && tool !== 'mosaic' && tool !== 'crop' && <AnnotationColorControl value={color} onChange={setColor} disabled={locked} />}
           {tool !== 'text' && tool !== 'crop' && <label className="ime-size" title={brushLabel}><span>{tool === 'mosaic' ? '色块' : '大小'}</span><input aria-label={brushLabel} type="range" min={tool === 'eraser' ? 4 : 2} max={tool === 'eraser' ? 160 : 48} value={tool === 'eraser' ? eraserSize : size} disabled={locked} onChange={(event) => (tool === 'eraser' ? setEraserSize : setSize)(Number(event.target.value))} /><output>{tool === 'eraser' ? eraserSize : tool === 'mosaic' ? Math.max(8, size * 2) : size}</output></label>}
-          {tool === 'text' && <><input className="ime-text" aria-label="批注文字" placeholder="输入文字，点击图片放置" value={text} disabled={locked} onChange={(event) => setText(event.target.value)} /><input className="ime-text-size" type="number" aria-label="文字大小" title="文字大小" min="8" max="300" value={textSize} disabled={locked} onChange={(event) => setTextSize(Math.max(8, Math.min(300, Number(event.target.value) || 8)))} /></>}
-          {crop && <button type="button" className="ime-primary" onClick={() => commit({ kind: 'crop', rect: crop })} disabled={locked}><EditorIcon name="check" />应用裁剪</button>}
+          {tool === 'text' && <><Input className="ime-text" aria-label="批注文字" placeholder="输入文字，点击图片放置" value={text} disabled={locked} onChange={(event) => setText(event.target.value)} /><Input className="ime-text-size" type="number" aria-label="文字大小" title="文字大小" min="8" max="300" value={textSize} disabled={locked} onChange={(event) => setTextSize(Math.max(8, Math.min(300, Number(event.target.value) || 8)))} /></>}
+          {crop && <Button size="sm" variant="default" className="ime-primary" onClick={() => commit({ kind: 'crop', rect: crop })} disabled={locked}><EditorIcon name="check" />应用裁剪</Button>}
         </div>}
         <div className="ime-capsule ime-save-actions" role="group" aria-label="保存与导出">
-          <button type="button" className="ime-icon-button" aria-label="取消" title="取消编辑" onClick={requestCancel} disabled={busy}><EditorIcon name="cancel" /></button>
+          <Button size="icon-sm" className="ime-icon-button" aria-label="取消" title="取消编辑" onClick={requestCancel} disabled={busy}><EditorIcon name="cancel" /></Button>
           <select aria-label="导出格式" title="导出格式" value={format} onChange={(event) => setFormat(event.target.value as ImageFormat)} disabled={busy}><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select>
           {format !== 'png' && <select aria-label="导出质量" title="导出质量" value={quality} disabled={busy} onChange={(event) => setQuality(Number(event.target.value))}><option value="0.92">高质量</option><option value="0.8">标准</option><option value="0.6">小文件</option></select>}
-          <button type="button" className="ime-icon-button" aria-label="导出文件" title="导出文件" onClick={() => void save(true)} disabled={locked || Boolean(crop || draft)}><EditorIcon name="export" /></button>
-          <button type="button" className="ime-primary" onClick={() => void save(false)} disabled={locked || Boolean(crop || draft)}><EditorIcon name="save" />{busy ? '保存中…' : '保存副本'}</button>
+          <Button size="icon-sm" className="ime-icon-button" aria-label="导出文件" title="导出文件" onClick={() => void save(true)} disabled={locked || Boolean(crop || draft)}><EditorIcon name="export" /></Button>
+          <Button size="sm" variant="default" className="ime-primary" onClick={() => void save(false)} disabled={locked || Boolean(crop || draft)}><EditorIcon name="save" />{busy ? '保存中…' : '保存副本'}</Button>
         </div>
       </div>
     </div>
-    {confirmDiscard && <div className="ime-discard" data-esc-layer role="alertdialog" aria-label="放弃图片编辑"><span>放弃未保存的修改？</span><button type="button" onClick={() => finishDiscard(false)}>继续编辑</button><button type="button" onClick={() => finishDiscard(true)}>放弃修改</button></div>}
+    {confirmDiscard && <div className="ime-discard" data-esc-layer role="alertdialog" aria-label="放弃图片编辑"><span>放弃未保存的修改？</span><Button size="sm" variant="outline" onClick={() => finishDiscard(false)}>继续编辑</Button><Button size="sm" variant="destructive" onClick={() => finishDiscard(true)}>放弃修改</Button></div>}
   </div>;
 }

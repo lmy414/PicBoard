@@ -10,7 +10,7 @@
   import '/renderer/src/styles.css';
 
   const parameters = new URLSearchParams(location.search);
-  localStorage.clear();
+  if (!parameters.has('keepPreferences')) localStorage.clear();
   localStorage.setItem('quick-image-board.history-open', parameters.get('history') === 'off' ? '0' : '1');
   if (parameters.has('sidebar')) localStorage.setItem('quick-image-board.sidebar-collapsed', parameters.get('sidebar') === 'off' ? '1' : '0');
   const iso = '2026-11-03T12:00:00.000Z';
@@ -74,6 +74,13 @@
     getContentBody: async (id) => ({ text: state.contents[id]?.preview ?? '', html: null }),
     setCanvasViewport: async (id, viewport) => {
       calls.viewports.push({ id, viewport }); state = { ...state, canvases: state.canvases.map(c => c.id === id ? { ...c, viewport } : c) }; return clone();
+    },
+    moveNodes: async (positions) => {
+      const positionsById = new Map(positions.map(({ nodeId, x, y }) => [nodeId, { x, y }]));
+      state = { ...state, revision: state.revision + 1, canvases: state.canvases.map(canvas => ({
+        ...canvas, nodes: canvas.nodes.map(node => ({ ...node, ...positionsById.get(node.id) })),
+      })) };
+      return clone();
     },
     setActiveCanvas: async (id) => { state = { ...state, activeCanvasId: id }; return clone(); },
     copyContents: async (ids) => ({ copied: ids.length }), openExternalUrl: async () => {},

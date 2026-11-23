@@ -1,10 +1,8 @@
-/* ---- design tokens ---------------------------------------------------------
-One warm-paper palette. Component CSS reads only the semantic names below;
-the historical --canvas/--ink/--shadow-* names stay mapped as aliases in this
-same block. */
+@import "./ui/coss/coss.css";
+
 :root{
   /* surfaces */
-  --surface-app: #fafaf9;
+  --surface-app: #f5f6f6;
   --surface-panel: #ffffff;
   --surface-raised: #ffffff;
   --surface-canvas: #ffffff;
@@ -47,12 +45,15 @@ same block. */
   /* palette */
   --accent: #23856b;
   --accent-ink: #1b6b56;
+  --action-fill: #1b6b56;
+  --action-ink: #ffffff;
   --accent-soft: #e7f2ee;
   --accent-line: rgba(35, 133, 107, .35);
   --accent-wash: rgba(35, 133, 107, .1);
   --success: #23856b;
   --success-soft: #e7f2ee;
   --danger: #b84646;
+  --danger-fill: #a63434;
   --danger-soft: #f9ecea;
   --warning-soft: #fdf3e3;
   --warning-border: #ecd9b8;
@@ -61,9 +62,9 @@ same block. */
   --scrollbar-thumb: rgba(32, 36, 33, .16);
   --scrollbar-thumb-hover: rgba(32, 36, 33, .28);
   /* radii */
-  --radius-s: 8px;
-  --radius-m: 10px;
-  --radius-l: 14px;
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 10px;
   /* legacy aliases: older component CSS reads these names */
   --canvas: var(--surface-panel);
   --surface: var(--surface-app);
@@ -126,16 +127,18 @@ body{
   font-size: 13px;
   line-height: 1.5;
 }
-button{
-  border: 0;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  background: transparent;
-}
-button:disabled{
-  cursor: default;
-  opacity: .45;
+@layer base {
+  button{
+    border: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    background: transparent;
+  }
+  button:disabled{
+    cursor: default;
+    opacity: .45;
+  }
 }
 input, textarea, select{
   font: inherit;
@@ -167,21 +170,19 @@ button:active:not(:disabled){
 /* Flat control preset: quiet fill, background shift on hover and press.
 Borders and shadows stay reserved for real surfaces. */
 .small-button,
-.zoom-controls button, .loading-actions button, .dialog-actions button,
+.zoom-controls button, .loading-actions button,
 .pattern-options button, .category-chip, .category-grid button{
   background: var(--surface-sunken);
 }
 .small-button:hover:not(:disabled),
 .zoom-controls button:hover:not(:disabled),
 .loading-actions button:hover:not(:disabled),
-.dialog-actions button:hover:not(:disabled),
 .pattern-options button:hover:not(:disabled){
   background: var(--surface-hover);
 }
 .small-button:active:not(:disabled),
 .zoom-controls button:active:not(:disabled),
 .loading-actions button:active:not(:disabled),
-.dialog-actions button:active:not(:disabled),
 .pattern-options button:active:not(:disabled){
   background: var(--surface-pressed);
 }
@@ -768,6 +769,7 @@ visible at the right edge of the scrollport. */
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  container: canvas-viewport / inline-size;
   cursor: grab;
   touch-action: none;
   background-color: var(--canvas-bg, #ffffff);
@@ -1305,6 +1307,12 @@ only visible on hover/selection. */
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
+@container canvas-viewport (max-width: 660px) {
+  .mini-map {
+    top: 12px;
+    bottom: auto;
+  }
+}
 /* ---- workspace sidebar & canvas tree -----------------------------------------
 A single aside is the width placeholder and its single .sidebar-content panel
 moves between docked, hover-peek and closed states. Keeping one tree in one
@@ -1337,7 +1345,7 @@ node means pinning never clones or remounts the search/tree state. */
   min-height: 0;
   overflow: hidden;
   border-radius: 0;
-  background: var(--surface);
+  background: var(--surface-panel);
   box-shadow: inset -1px 0 0 var(--line);
   opacity: 1;
   transform: none;
@@ -1496,6 +1504,7 @@ layout change, so the canvas never moves while the pointer travels. */
 .sidebar-nav button{
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   height: 27px;
   padding: 0 8px;
@@ -1908,10 +1917,11 @@ layout change, so the canvas never moves while the pointer travels. */
 /* ---- selection toolbar ------------------------------------------------------------ */
 .selection-toolbar{
   position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  z-index: 16;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1921,9 +1931,12 @@ layout change, so the canvas never moves while the pointer travels. */
   border: var(--edge);
   box-shadow: var(--elev-3);
   white-space: nowrap;
-  max-width: calc(100% - 24px);
+  max-width: calc(100% - 16px);
   flex-wrap: wrap;
   row-gap: 4px;
+}
+.selection-toolbar[data-positioned]{
+  visibility: visible;
 }
 .selection-toolbar span{
   color: var(--muted);
@@ -2261,7 +2274,7 @@ layout change, so the canvas never moves while the pointer travels. */
   width: min(320px, calc(100% - 30px));
   padding: 16px;
   border-radius: var(--radius-panel);
-  background: var(--surface-panel);
+  background: var(--surface-raised);
   border: var(--edge);
   box-shadow: var(--elev-3);
 }

@@ -29,13 +29,16 @@ for (const width of [1440, 1000, 720]) for (const history of [true, false]) {
     const initial = (await page.locator('.workspace-main').boundingBox())!;
     const trigger = (await page.locator('.sidebar-toggle').boundingBox())!;
     await peek(page);
-    // Cross the real gap below the trigger, staying inside the grace period.
-    await page.mouse.move(trigger.x + trigger.width / 2, 47); await page.waitForTimeout(70);
-    await expect(page.locator('.sidebar')).toHaveClass(/is-peeking/);
     const heading = (await page.locator('.sidebar-search').boundingBox())!;
+    // Cross the real gap below the trigger, staying inside the grace period.
+    await page.mouse.move(trigger.x + trigger.width / 2, 47);
     await page.mouse.move(heading.x + heading.width / 2, heading.y + heading.height / 2);
     await page.waitForTimeout(240);
     await expect(page.locator('.sidebar')).toHaveClass(/is-peeking/);
+    if (width === 720 && history) {
+      await expect(page.getByRole('complementary', { name: '剪贴板历史面板' })).toBeHidden();
+      expect(await page.evaluate(() => localStorage.getItem('quick-image-board.history-open'))).toBe('1');
+    }
     const floating = (await page.locator('.workspace-main').boundingBox())!;
     expect(floating.x).toBeCloseTo(initial.x, 1); expect(floating.width).toBeCloseTo(initial.width, 1);
     expect(await page.evaluate(() => localStorage.getItem('quick-image-board.sidebar-collapsed'))).toBe('1');
@@ -46,6 +49,7 @@ for (const width of [1440, 1000, 720]) for (const history of [true, false]) {
     await expect(page.locator('.sidebar')).toHaveClass(/is-peeking/);
     await expect(page.locator('.sidebar')).toHaveClass(/closed/);
     await expect(page.locator('.sidebar-content')).toHaveAttribute('inert', '');
+    if (width === 720 && history) await expect(page.getByRole('complementary', { name: '剪贴板历史面板' })).toBeVisible();
     await peek(page);
     await page.getByRole('button', { name: '固定侧边栏', exact: true }).click();
     await expect(page.locator('.sidebar')).toHaveClass(/is-pinned/);

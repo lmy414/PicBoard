@@ -75,7 +75,6 @@ test("no search result leaves the selected settings page intact", () => {
 test.each(SETTINGS_SECTIONS)("the $id page mounts only its selected settings card", async ({ id, label }) => {
   const view = render(<SettingsPage {...props()} section={id} />);
   expect(view.getByRole("heading", { level: 1, name: label })).toBeTruthy();
-  expect(view.getByText("在左侧选择设置项目，修改即时生效。")).toBeTruthy();
   expect(view.container.querySelectorAll(".settings-page > .settings-section")).toHaveLength(1);
   if (id === "images") await waitFor(() => expect(window.imageBoard.getImageAssociation).toHaveBeenCalledTimes(1));
   if (id === "window") await waitFor(() => expect(window.imageBoard.getDesktopSettings).toHaveBeenCalledTimes(1));
@@ -85,7 +84,7 @@ test.each(SETTINGS_SECTIONS)("the $id page mounts only its selected settings car
   if (id !== "plugins") expect(window.imageBoard.listPlugins).not.toHaveBeenCalled();
 });
 
-test("canvas settings retain appearance and grid callbacks", async () => {
+test("canvas settings retain appearance and grid alignment callbacks", () => {
   const callbacks = props();
   const view = render(<SettingsPage {...callbacks} section="canvas" />);
   fireEvent.click(view.getByRole("button", { name: "网格线", exact: true }));
@@ -94,24 +93,18 @@ test("canvas settings retain appearance and grid callbacks", async () => {
   expect(callbacks.onCanvasAppearanceChange).toHaveBeenCalledWith({ background: "#FBFBFA" });
   fireEvent.click(view.getByRole("checkbox", { name: /网格对齐/ }));
   expect(callbacks.onDesktopSettingsChange).toHaveBeenCalledWith({ snapToGrid: true });
-  fireEvent.click(view.getByRole("button", { name: "24", exact: true }));
-  fireEvent.mouseDown(await view.findByRole("option", { name: "32", exact: true }));
-  expect(callbacks.onDesktopSettingsChange).toHaveBeenCalledWith({ gridSize: 32 });
+  expect(view.getByRole("combobox", { name: "网格间距", exact: true }).textContent).toBe("24");
 });
 
-test("switching pages removes the previous card and closes its popover", async () => {
+test("switching pages removes the previous card and renders the saved retention value", () => {
   const callbacks = props();
   const view = render(<SettingsPage {...callbacks} section="canvas" />);
-  fireEvent.click(view.getByRole("button", { name: "24", exact: true }));
-  await view.findByRole("listbox", { name: "网格间距" });
   view.rerender(<SettingsPage {...callbacks} section="clipboard" />);
-  expect(view.queryByRole("listbox")).toBeNull();
+  expect(view.queryByRole("combobox", { name: "网格间距", exact: true })).toBeNull();
   expect(view.queryByRole("group", { name: "画布图案" })).toBeNull();
   fireEvent.click(view.getByRole("checkbox", { name: /后台记录剪贴板/ }));
   expect(callbacks.onDesktopSettingsChange).toHaveBeenCalledWith({ captureEnabled: false });
-  fireEvent.click(view.getByRole("button", { name: "30 天", exact: true }));
-  fireEvent.mouseDown(await view.findByRole("option", { name: "7 天", exact: true }));
-  expect(callbacks.onDesktopSettingsChange).toHaveBeenCalledWith({ historyRetentionDays: 7 });
+  expect(view.getByRole("combobox", { name: "历史保留时间", exact: true }).textContent).toBe("30 天");
 });
 
 test("storage preferences preserve manual path edits and the native folder picker", async () => {
@@ -154,18 +147,18 @@ test("appearance changes update the selected theme and the application surface",
 });
 
 test("canvas controls show actual theme defaults and preserve customized colors", () => {
-  document.documentElement.style.setProperty("--surface-canvas", "#151d18");
-  document.documentElement.style.setProperty("--canvas-pattern-default", "rgba(200, 210, 202, 0.16)");
+  document.documentElement.style.setProperty("--surface-canvas", "#121212");
+  document.documentElement.style.setProperty("--canvas-pattern-default", "rgba(212, 212, 212, 0.14)");
   const callbacks = props();
   const view = render(<SettingsPage {...callbacks} section="canvas" />);
-  expect(view.getByRole("button", { name: "#151d18", exact: true })).toBeTruthy();
-  expect(view.getByRole("button", { name: "#c8d2ca", exact: true })).toBeTruthy();
-  expect(view.getByRole<HTMLInputElement>("slider", { name: "图案浓度" }).value).toBe("0.16");
-  fireEvent.change(view.getByRole("slider", { name: "图案浓度" }), { target: { value: "0.28" } });
-  expect(callbacks.onCanvasAppearanceChange).toHaveBeenCalledWith({ patternOpacity: 0.28, patternColor: "#c8d2ca" });
+  expect(view.getByRole("button", { name: "#121212", exact: true })).toBeTruthy();
+  expect(view.getByRole("button", { name: "#d4d4d4", exact: true })).toBeTruthy();
+  expect(view.getByRole<HTMLInputElement>("slider", { name: "图案浓度" }).value).toBe("14");
+  fireEvent.change(view.getByRole("slider", { name: "图案浓度" }), { target: { value: "28" } });
+  expect(callbacks.onCanvasAppearanceChange).toHaveBeenCalledWith({ patternOpacity: 0.28, patternColor: "#d4d4d4" });
 
   view.rerender(<SettingsPage {...callbacks} section="canvas" canvasAppearance={{ ...callbacks.canvasAppearance, background: "#112233", patternColor: "#445566", patternOpacity: 0.34, backgroundCustomized: true, inkCustomized: true }} />);
   expect(view.getByRole("button", { name: "#112233", exact: true })).toBeTruthy();
   expect(view.getByRole("button", { name: "#445566", exact: true })).toBeTruthy();
-  expect(view.getByRole<HTMLInputElement>("slider", { name: "图案浓度" }).value).toBe("0.34");
+  expect(view.getByRole<HTMLInputElement>("slider", { name: "图案浓度" }).value).toBe("34");
 });

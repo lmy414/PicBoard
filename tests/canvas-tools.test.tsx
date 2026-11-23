@@ -332,6 +332,7 @@ test('hiding the document clears a held Space key and cancels an active selectio
 test('pan mode leaves mini-map navigation available', () => {
   const stage = mountStage({ interactionMode: 'pan' });
   const map = stage.viewport.querySelector<HTMLElement>('.mini-map')!;
+  vi.spyOn(map, 'getBoundingClientRect').mockReturnValue(new DOMRect(90, 80, 164, 104));
   pointerDown(map);
   pointerMove(map);
   pointerUp(map);

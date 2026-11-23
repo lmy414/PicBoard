@@ -1,6 +1,6 @@
 {
   "name": "picboard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Windows 悬浮图片收集与本地画板",
   "license": "MIT",
@@ -27,6 +27,7 @@
     "test:browser": "playwright test"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
     "@floating-ui/dom": "^1.8.0",
     "@tauri-apps/api": "^2.11.1",
     "@tiptap/core": "^3.32.2",
@@ -45,12 +46,14 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
+    "@tailwindcss/vite": "4.1.17",
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "jsdom": "^25.0.1",
+    "tailwindcss": "4.1.17",
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.9"

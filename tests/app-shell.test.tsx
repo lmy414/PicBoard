@@ -178,7 +178,7 @@ test('settings has one entry in the sidebar footer and opens from there', async 
   expect(settings.getAttribute('aria-pressed')).toBe('true');
 });
 
-test('library tools stay at the top and preserve filters when returning from content', async () => {
+test('library tools stay at the top and preserve search when returning from content', async () => {
   setInnerWidth(1400);
   render(<App />);
   await screen.findAllByText('主画布');
@@ -188,7 +188,6 @@ test('library tools stay at the top and preserve filters when returning from con
   expect(document.querySelector('.lib-view .lib-toolbar')).toBeNull();
   const search = screen.getByRole('textbox', { name: '搜索内容' });
   fireEvent.change(search, { target: { value: '第一条' } });
-  fireEvent.change(screen.getByRole('combobox', { name: '按分类筛选' }), { target: { value: 'none' } });
   const card = document.querySelector<HTMLElement>('.lib-grid > .lib-card')!;
   expect(card).toBeTruthy();
   fireEvent.click(card);
@@ -200,7 +199,7 @@ test('library tools stay at the top and preserve filters when returning from con
   fireEvent.click(screen.getByRole('button', { name: '返回到分类库' }));
   await screen.findByRole('toolbar', { name: '分类库工具' });
   expect(screen.getByRole<HTMLInputElement>('textbox', { name: '搜索内容' }).value).toBe('第一条');
-  expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '按分类筛选' }).value).toBe('none');
+  expect(screen.getByRole('combobox', { name: '按分类筛选' }).textContent).toBe('全部分类');
   expect(screen.queryByRole('toolbar', { name: '内容工具' })).toBeNull();
 });
 

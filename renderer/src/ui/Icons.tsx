@@ -94,6 +94,16 @@ export function IconMinus(props: IconProps) {
   );
 }
 
+export function IconMiniMap(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 9h4v3H7z" />
+      <rect x="12" y="11" width="6" height="5" rx="1" />
+    </Icon>
+  );
+}
+
 export function IconPanelLeft(props: IconProps) {
   return (
     <Icon {...props}>

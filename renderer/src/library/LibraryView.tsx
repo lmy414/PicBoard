@@ -5,7 +5,9 @@ import type { AppState, ContentRecord } from "../../../shared/image-board";
 import { KIND_LABEL, KIND_ORDER, buildPlacementIndex, contentTitle, displayContentKind, matchesContentKind, matchesQuery, relativeTime } from "../content/content-meta";
 import type { DisplayContentKind } from "../content/content-meta";
 import { IconClipboard, KindIcon } from "../ui/ContentIcons";
-import { IconChevronDown, IconClose, IconSearch } from "../ui/Icons";
+import { IconClose, IconSearch } from "../ui/Icons";
+import { Button, Input, SegmentedControl, SegmentedControlItem } from "../ui/coss/Primitives";
+import { Select } from "../ui/Select";
 import { usePresence } from "../ui/motion";
 import { ContentCover, contentCoverSource } from "./ContentCover";
 import "./library.css";
@@ -311,7 +313,7 @@ export function LibraryView(props: LibraryViewProps) {
           <div className="lib-toolbar-row">
             <div className="lib-search">
               <IconSearch size={14} />
-              <input
+              <Input
                 value={query}
                 placeholder="搜索内容"
                 aria-label="搜索内容"
@@ -326,68 +328,40 @@ export function LibraryView(props: LibraryViewProps) {
                 }}
               />
               {query ? (
-                <button type="button" className="lib-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}>
+                <Button size="icon-sm" className="lib-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}>
                   <IconClose size={12} />
-                </button>
+                </Button>
               ) : null}
             </div>
 
-            <div className="lib-kind-chips" role="group" aria-label="按类型筛选">
-              <button
-                type="button"
+            <SegmentedControl className="lib-kind-chips" aria-label="按类型筛选">
+              <SegmentedControlItem
                 className={kind === "all" ? "active" : ""}
                 aria-pressed={kind === "all"}
                 onClick={() => setKind("all")}
               >
                 全部<span>{allContents.length}</span>
-              </button>
+              </SegmentedControlItem>
               {KIND_ORDER.map((entry) => (
-                <button
+                <SegmentedControlItem
                   key={entry}
-                  type="button"
                   className={kind === entry ? "active" : ""}
                   aria-pressed={kind === entry}
                   onClick={() => setKind(entry)}
                 >
                   {KIND_LABEL[entry]}
                   <span>{kindCounts[entry]}</span>
-                </button>
+                </SegmentedControlItem>
               ))}
-            </div>
+            </SegmentedControl>
 
             <div className="lib-filters">
-              <span className="lib-select-wrap">
-                <select
-                  className="lib-select"
-                  value={category}
-                  aria-label="按分类筛选"
-                  onChange={(event) => setCategory(event.target.value)}
-                >
-                  <option value="all">全部分类</option>
-                  <option value="none">未分类</option>
-                  {state.categories.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.name}
-                    </option>
-                  ))}
-                </select>
-                <IconChevronDown size={12} />
-              </span>
-              <span className="lib-select-wrap">
-                <select
-                  className="lib-select"
-                  value={time}
-                  aria-label="按创建时间筛选"
-                  onChange={(event) => setTime(event.target.value as TimeFilter)}
-                >
-                  {TIME_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <IconChevronDown size={12} />
-              </span>
+              <Select compact label="按分类筛选" value={category} onChange={setCategory} options={[
+                { value: "all", label: "全部分类" },
+                { value: "none", label: "未分类" },
+                ...state.categories.map((entry) => ({ value: entry.id, label: entry.name })),
+              ]} />
+              <Select compact label="按创建时间筛选" value={time} onChange={(value) => setTime(value as TimeFilter)} options={TIME_OPTIONS} />
             </div>
           <div className="lib-summary">
             <span>
@@ -396,10 +370,10 @@ export function LibraryView(props: LibraryViewProps) {
             {selectedIds.length > 0 ? (
               <span className="lib-selection">
                 已选 {selectedIds.length} 项
-                <button type="button" aria-label="操作选中内容" onClick={(event) => props.onQuickActions(event, selectedIds[0])}>操作</button>
-                <button type="button" onClick={props.onClearSelection}>
+                <Button size="sm" aria-label="操作选中内容" onClick={(event) => props.onQuickActions(event, selectedIds[0])}>操作</Button>
+                <Button size="sm" onClick={props.onClearSelection}>
                   清除选择
-                </button>
+                </Button>
               </span>
             ) : null}
           </div>

@@ -5,6 +5,7 @@ import { KIND_LABEL, buildPlacementIndex, contentTitle, relativeTime } from "../
 import { ContentCover, contentCoverSource } from "../library/ContentCover";
 import { IconArrowLeft, IconCanvas, IconClipboard, IconCopy, IconExternalLink, IconTag, KindIcon } from "../ui/ContentIcons";
 import { IconCheck, IconChevronDown, IconClose, IconDots, IconGear, IconPlus, IconSearch } from "../ui/Icons";
+import { Button, Input, SegmentedControl, SegmentedControlItem } from "../ui/coss/Primitives";
 import { usePresence } from "../ui/motion";
 import { hostErrorMessage } from "../pages/page-utils";
 import {
@@ -803,8 +804,8 @@ export function TrayPanel(): JSX.Element {
           </span>
           <strong className="tray-name">PicBoard</strong>
           <span className="tray-head-grow" />
-          <button
-            type="button"
+          <Button
+            size="sm"
             className={`tray-icon-button${captureEnabled ? "" : " is-paused"}`}
             title={captureEnabled ? "记录中（点击暂停）" : "已暂停（点击恢复）"}
             aria-pressed={captureEnabled}
@@ -812,40 +813,39 @@ export function TrayPanel(): JSX.Element {
           >
             <span className="tray-record-dot" aria-hidden="true" />
             {captureEnabled ? "记录中" : "已暂停"}
-          </button>
-          <button type="button" className="tray-icon-button" title="打开主窗口" aria-label="打开主窗口" onClick={() => openMain()}>
+          </Button>
+          <Button size="icon-sm" className="tray-icon-button" title="打开主窗口" aria-label="打开主窗口" onClick={() => openMain()}>
             <IconExternalLink size={14} />
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="icon-sm"
             className="tray-icon-button"
             title="设置"
             aria-label="设置"
             onClick={() => openMain({ view: "settings" })}
           >
             <IconGear size={14} />
-          </button>
+          </Button>
         </header>
 
         <div className="tray-content motion-slide-up" data-motion="enter" key={showToken}>
           <div className="tray-tabs-row">
-            <div className="tray-tabs" role="group" aria-label="内容类型">
+            <SegmentedControl className="tray-tabs" aria-label="内容类型">
               {TRAY_TABS.map((entry) => (
-                <button
+                <SegmentedControlItem
                   key={entry}
-                  type="button"
                   className={`tray-tab${tab === entry ? " active" : ""}`}
                   aria-pressed={tab === entry}
                   onClick={() => setTab(entry)}
                 >
                   {TRAY_TAB_LABEL[entry]}
                   <span>{tabCounts[entry]}</span>
-                </button>
+                </SegmentedControlItem>
               ))}
-            </div>
+            </SegmentedControl>
             <div className="tray-search">
               <IconSearch size={13} />
-              <input
+              <Input
                 ref={searchInputRef}
                 value={query}
                 placeholder="搜索内容"
@@ -941,11 +941,11 @@ export function TrayPanel(): JSX.Element {
           </div>
 
           <footer className="tray-foot">
-            <button type="button" className="tray-foot-main" onClick={() => openMain()}>
+            <Button variant="default" className="tray-foot-main" onClick={() => openMain()}>
               打开 PicBoard
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="outline"
               className="tray-foot-quit"
               onClick={() =>
                 void window.imageBoard
@@ -954,7 +954,7 @@ export function TrayPanel(): JSX.Element {
               }
             >
               退出
-            </button>
+            </Button>
           </footer>
         </div>
       </div>

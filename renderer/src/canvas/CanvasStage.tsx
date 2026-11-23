@@ -96,6 +96,8 @@ export interface CanvasStageProps {
   onViewport(viewport: CanvasViewport): void;
   onZoomChange(zoom: number): void;
   onInteractionChange(busy: boolean): void;
+  minimapVisible?: boolean;
+  onMinimapDefaultChange?(visible: boolean): void;
 }
 
 interface PanSession {
@@ -1279,6 +1281,12 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const handleEdgeMenu = useCallback((edgeId: string, clientX: number, clientY: number) => implRef.current?.edgeMenu(edgeId, clientX, clientY), []);
 
   const empty = nodes.length === 0 && cards.length === 0;
+  const minimapDefault = !empty && canvasWide;
+  const { onMinimapDefaultChange } = props;
+  useLayoutEffect(() => {
+    onMinimapDefaultChange?.(minimapDefault);
+  }, [minimapDefault, onMinimapDefaultChange]);
+
   const handTool = interactionMode === "pan" || spacePressed;
   const suppressPanActivation = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -1388,7 +1396,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         </div>
       )}
       <MiniMap
-        open={!empty && canvasWide}
+        open={props.minimapVisible ?? minimapDefault}
         narrow={!canvasWide}
         nodes={nodes}
         cards={cards}

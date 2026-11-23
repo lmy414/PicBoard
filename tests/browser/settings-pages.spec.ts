@@ -83,7 +83,7 @@ async function assertPopoverVisibleAndHitTested(page: Page, popover: Locator, la
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
     const layer = element.closest('.qib-popover-layer');
-    const inBody = layer?.parentElement === document.body;
+    const inBody = Boolean(layer && document.body.contains(layer) && !document.getElementById('root')?.contains(layer));
     const layerPosition = layer ? getComputedStyle(layer).position : null;
     const fitsViewport =
       rect.width > 0 &&
@@ -128,18 +128,21 @@ test('settings entry, 8 independent sections, real option interactions, and retu
   await expect(page.getByRole('group', { name: '画布图案' })).toBeVisible();
   await expect(page.getByRole('radiogroup', { name: '关闭窗口时' })).toHaveCount(0);
   await expect(page.getByRole('radiogroup', { name: '界面主题' })).toHaveCount(0);
-  const gridTrigger = fieldTrigger(page, '网格间距', '.qib-select-trigger');
+  const gridTrigger = page.getByRole('combobox', { name: '网格间距', exact: true });
   await expect(gridTrigger).toContainText('24');
   await gridTrigger.click();
   const gridListbox = page.getByRole('listbox', { name: '网格间距' });
   await assertPopoverVisibleAndHitTested(page, gridListbox, '网格间距');
-  await gridListbox.getByRole('option', { name: '32', exact: true }).dispatchEvent('mousedown');
+  await gridListbox.getByRole('option', { name: '32', exact: true }).click();
   await expect(gridTrigger).toContainText('32');
   await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.desktopSettings.gridSize)).toBe(32);
   await capture(page, testInfo, '01-canvas-section');
 
   // 2. 剪贴板 (Clipboard): only clipboard controls mounted, toggle captureEnabled & retention Select
+  await gridTrigger.click();
+  await expect(gridListbox).toBeVisible();
   await nav.getByRole('button', { name: '剪贴板', exact: true }).click();
+  await expect(gridListbox).toHaveCount(0);
   await expect(page.locator('.settings-view h1')).toHaveText('剪贴板');
   await expect(page.locator('.settings-view .settings-section')).toHaveCount(1);
   await expect(page.getByRole('group', { name: '画布图案' })).toHaveCount(0);
@@ -148,6 +151,11 @@ test('settings entry, 8 independent sections, real option interactions, and retu
   await captureCheckbox.uncheck();
   await expect(captureCheckbox).not.toBeChecked();
   await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.desktopSettings.captureEnabled)).toBe(false);
+  const retention = page.getByRole('combobox', { name: '历史保留时间', exact: true });
+  await retention.click();
+  await page.getByRole('option', { name: '7 天', exact: true }).click();
+  await expect(retention).toContainText('7 天');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.desktopSettings.historyRetentionDays)).toBe(7);
 
   // 3. 存储目录 (Storage): only storage controls mounted, pickDirectory updates path
   await nav.getByRole('button', { name: '存储目录', exact: true }).click();
@@ -383,7 +391,7 @@ test('narrow 720x480 viewport keeps settings navigation reachable and all Select
   await expect(page.locator('.settings-view h1')).toHaveText('画布');
 
   // 1. Select: 网格间距
-  const gridTrigger = fieldTrigger(page, '网格间距', '.qib-select-trigger');
+  const gridTrigger = page.getByRole('combobox', { name: '网格间距', exact: true });
   await gridTrigger.scrollIntoViewIfNeeded();
   await gridTrigger.click();
   const gridListbox = page.getByRole('listbox', { name: '网格间距' });
@@ -391,6 +399,7 @@ test('narrow 720x480 viewport keeps settings navigation reachable and all Select
   await capture(page, testInfo, '06-narrow-select-grid');
   await page.keyboard.press('Escape');
   await expect(gridListbox).toHaveCount(0);
+  await expect(gridTrigger).toBeFocused();
 
   // 2. ColorPicker: 背景颜色
   const bgColorTrigger = fieldTrigger(page, '背景颜色', '.qib-color-trigger');
@@ -417,12 +426,12 @@ test('narrow 720x480 viewport keeps settings navigation reachable and all Select
   await clipboardBtn.scrollIntoViewIfNeeded();
   await clipboardBtn.click();
   await expect(page.locator('.settings-view h1')).toHaveText('剪贴板');
-  const retentionTrigger = fieldTrigger(page, '历史保留时间', '.qib-select-trigger');
+  const retentionTrigger = page.getByRole('combobox', { name: '历史保留时间', exact: true });
   await retentionTrigger.scrollIntoViewIfNeeded();
   await retentionTrigger.click();
   const retentionListbox = page.getByRole('listbox', { name: '历史保留时间' });
   await assertPopoverVisibleAndHitTested(page, retentionListbox, '历史保留时间 (720x480)');
-  await retentionListbox.getByRole('option', { name: '90 天', exact: true }).dispatchEvent('mousedown');
+  await retentionListbox.getByRole('option', { name: '90 天', exact: true }).click();
   await expect(retentionTrigger).toContainText('90 天');
   await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.desktopSettings.historyRetentionDays)).toBe(90);
   await capture(page, testInfo, '09-narrow-select-retention');
@@ -455,6 +464,7 @@ test('appearance changes rendered surfaces, text and popovers while preserving a
   await nav.getByRole('button', { name: '外观', exact: true }).click();
   await page.getByRole('radio', { name: '黑夜', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.sidebar-content')).toHaveCSS('background-color', 'rgb(28, 28, 28)');
   for (const [index, selector] of surfaces.entries()) {
     const dark = await renderedColors(page.locator(selector).first());
     expect(dark.background, `${selector} background becomes darker`).toBeLessThan(light[index].background - 80);
@@ -463,11 +473,13 @@ test('appearance changes rendered surfaces, text and popovers while preserving a
   await capture(page, testInfo, '10-dark-appearance');
   await nav.getByRole('button', { name: '画布', exact: true }).click();
   const defaultCanvas = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--surface-canvas').trim().toLowerCase());
+  expect(defaultCanvas).toBe('#121212');
   await expect(fieldTrigger(page, '背景颜色', '.qib-color-trigger')).toContainText(defaultCanvas);
   await fieldTrigger(page, '背景颜色', '.qib-color-trigger').click();
   const darkPopup = page.getByRole('dialog', { name: '背景颜色' });
   await assertPopoverVisibleAndHitTested(page, darkPopup, 'dark background color');
   expect((await renderedColors(darkPopup)).background).toBeLessThan(lightPopup.background - 80);
+  await expect(darkPopup).toHaveCSS('background-color', 'rgb(36, 36, 36)');
   await capture(page, testInfo, '11-dark-color-popover');
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '返回画布', exact: true }).click();

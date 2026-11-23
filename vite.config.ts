@@ -3,8 +3,8 @@ import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(async () => ({
+  plugins: [react(), (await import("@tailwindcss/vite")).default()],
   base: "./",
   test: {
     setupFiles: ["./tests/setup.ts"],
@@ -39,4 +39,4 @@ export default defineConfig({
       ],
     },
   },
-});
+}));

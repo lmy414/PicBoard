@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { Slider } from "@base-ui/react/slider";
 import type { AppState, DesktopSettings, DesktopSettingsPatch, GridSize, HistoryRetentionDays } from "../../../shared/image-board";
 import type { CanvasAppearance, CanvasPattern } from "../canvas/canvas-appearance";
 import { PluginsSection } from "../plugins/PluginsSection";
@@ -7,6 +8,7 @@ import { DirectoryField } from "./DirectoryField";
 import { ImageFileSettings } from "./ImageFileSettings";
 import { Select } from "./Select";
 import { ShellSettings } from "./ShellSettings";
+import { Button, SegmentedControl, SegmentedControlItem } from "./coss/Primitives";
 import { useThemePreference } from "./theme";
 import "./settings-page.css";
 
@@ -45,9 +47,8 @@ export function SettingsNavigation({ section, onSectionChange, query }: Settings
       <span className="settings-navigation-label">设置项目</span>
       <div className="settings-navigation-list">
         {entries.map((entry) => (
-          <button
+          <Button
             key={entry.id}
-            type="button"
             className={entry.id === section ? "settings-navigation-item active" : "settings-navigation-item"}
             aria-current={entry.id === section ? "page" : undefined}
             title={entry.description}
@@ -55,7 +56,7 @@ export function SettingsNavigation({ section, onSectionChange, query }: Settings
           >
             <span className="settings-navigation-marker" aria-hidden="true" />
             <span>{entry.label}</span>
-          </button>
+          </Button>
         ))}
         {entries.length === 0 && <p className="settings-navigation-empty" role="status">没有匹配的设置项目，试试其他关键词。</p>}
       </div>
@@ -140,37 +141,33 @@ export function SettingsPage({ section, state, pathSettings, desktopSettings, ca
   return <section className="settings-view settings-page" aria-labelledby={headingId}>
     <div className="settings-heading settings-page-heading">
       <div>
-        <span className="settings-page-kicker">设置</span>
         <h1 id={headingId}>{current.label}</h1>
         <p>{current.description}</p>
-        <p className="settings-page-guidance">在左侧选择设置项目，修改即时生效。</p>
       </div>
+      {section === "categories" && <Button variant="default" onClick={() => void onAddCategory()}>＋ 新建分类</Button>}
     </div>
     {section === "canvas" && (
-      <section className="settings-section">
-        <div className="settings-section-heading"><div><strong>画布</strong><span>背景图案、网格与对齐方式。</span></div></div>
+      <section className="settings-section settings-canvas-controls">
         <div className="settings-row">
           <div className="settings-field">
-            <label>图案</label>
-            <div className="pattern-options" role="group" aria-label="画布图案">
+            <span className="qib-label">画布图案</span>
+            <SegmentedControl className="settings-pattern" aria-label="画布图案">
               {PATTERN_OPTIONS.map((option) => (
-                <button
+                <SegmentedControlItem
                   key={option.value}
-                  type="button"
-                  className={canvasAppearance.pattern === option.value ? "active" : undefined}
                   aria-pressed={canvasAppearance.pattern === option.value}
                   onClick={() => onCanvasAppearanceChange({ pattern: option.value })}
                 >
                   {option.label}
-                </button>
+                </SegmentedControlItem>
               ))}
-            </div>
+            </SegmentedControl>
           </div>
           <Select value={String(desktopSettings?.gridSize ?? 24)} label="网格间距" disabled={!desktopSettings} options={GRID_OPTIONS} onChange={(value) => onDesktopSettingsChange({ gridSize: Number(value) as GridSize })} />
         </div>
         <div className="settings-row">
           <div className="settings-field settings-field-wide">
-            <label>背景颜色</label>
+            <span className="qib-label">背景预设</span>
             <div className="color-options">
               {CANVAS_BACKGROUND_PRESETS.map((preset) => (
                 <button
@@ -190,18 +187,35 @@ export function SettingsPage({ section, state, pathSettings, desktopSettings, ca
         </div>
         <div className="settings-row">
           <ColorPicker key={canvasAppearance.inkCustomized ? "custom-ink" : resolvedTheme + "-ink"} value={canvasControls.patternColor} label="图案颜色" onChange={(hex) => onCanvasAppearanceChange({ patternColor: hex, ...(!canvasAppearance.inkCustomized ? { patternOpacity: canvasControls.patternOpacity } : null) })} />
-          <label className="range-field"><span><b>图案浓度</b><output>{Math.round(canvasControls.patternOpacity * 100)}%</output></span><input type="range" min="0" max="0.6" step="0.02" value={canvasControls.patternOpacity} aria-label="图案浓度" onChange={(event) => onCanvasAppearanceChange({ patternOpacity: Number(event.target.value), ...(!canvasAppearance.inkCustomized ? { patternColor: canvasControls.patternColor } : null) })} /></label>
+          <Slider.Root
+            className="range-field"
+            min={0}
+            max={60}
+            step={1}
+            value={Math.round(canvasControls.patternOpacity * 100)}
+            onValueChange={(next) => onCanvasAppearanceChange({
+              patternOpacity: next / 100,
+              ...(!canvasAppearance.inkCustomized ? { patternColor: canvasControls.patternColor } : null),
+            })}
+          >
+            <span className="qib-label"><b>图案浓度</b><output>{Math.round(canvasControls.patternOpacity * 100)}%</output></span>
+            <Slider.Control className="settings-slider" data-slot="slider-control">
+              <Slider.Track className="settings-slider-track" data-slot="slider-track">
+                <Slider.Indicator className="settings-slider-fill" data-slot="slider-indicator" />
+                <Slider.Thumb className="settings-slider-thumb" data-slot="slider-thumb" getAriaLabel={() => "图案浓度"} />
+              </Slider.Track>
+            </Slider.Control>
+          </Slider.Root>
         </div>
         <label className="settings-toggle">
           <input type="checkbox" checked={desktopSettings?.snapToGrid ?? false} disabled={!desktopSettings} onChange={(event) => onDesktopSettingsChange({ snapToGrid: event.target.checked })} />
           <span><b>网格对齐</b><small>开启后拖动与放置会吸附到网格；按住 Alt 可临时切换。</small></span>
         </label>
-        <p className="settings-note">背景颜色与图案只保存在本机；未手动选择背景时，画布使用默认的浅色底。网格间距与对齐用于画布操作。</p>
+        <p className="settings-note">默认画布颜色随主题变化，自定义颜色会保留。</p>
       </section>
     )}
     {section === "clipboard" && (
       <section className="settings-section">
-        <div className="settings-section-heading"><div><strong>剪贴板</strong><span>后台记录与历史保留策略。</span></div></div>
         <label className="settings-toggle">
           <input type="checkbox" checked={desktopSettings ? desktopSettings.captureEnabled !== false : true} disabled={!desktopSettings} onChange={(event) => onDesktopSettingsChange({ captureEnabled: event.target.checked })} />
           <span><b>后台记录剪贴板</b><small>复制的文字、富文本、链接和图片会进入历史；暂停后不再新增。</small></span>
@@ -214,25 +228,21 @@ export function SettingsPage({ section, state, pathSettings, desktopSettings, ca
     )}
     {section === "storage" && (
       <section className="settings-section">
-        <div className="settings-section-heading"><div><strong>存储目录</strong><span>只保存路径偏好，不会自动搬运或删除已有内容。</span></div></div>
         <div className="path-fields"><DirectoryField label="文件路径" value={pathSettings.filePath} onChange={(value) => onPathSettingsChange({ filePath: value })} /></div>
         <p className="settings-note">路径变更不会在当前版本执行迁移；现有数据仍由应用的本地存储目录保护。</p>
       </section>
     )}
     {section === "window" && (
       <section className="settings-section">
-        <div className="settings-section-heading"><div><strong>窗口与启动</strong><span>关闭行为与开机自启动。</span></div></div>
         <ShellSettings />
       </section>
     )}
     {section === "categories" && (
       <section className="settings-section">
-        <div className="settings-section-heading"><div><strong>分类管理</strong><span>分类会直接写入当前本地内容库。</span></div><button className="primary-button small-button" onClick={() => void onAddCategory()}>＋ 新建分类</button></div>
         <div className="category-list">{state.categories.map((category) => <span className="category-chip" key={category.id}>{category.name}</span>)}</div>
       </section>
     )}
     {section === "appearance" && <section className="settings-section" aria-label="外观设置">
-      <div className="settings-section-heading"><div><strong>界面主题</strong><span>选择适合当前环境的明暗外观。</span></div></div>
       <div className="settings-theme-options" role="radiogroup" aria-label="界面主题">
         {THEME_OPTIONS.map((option) => <label className={preference === option.value ? "settings-theme-option selected" : "settings-theme-option"} key={option.value}>
           <input type="radio" name={headingId + "-theme"} value={option.value} checked={preference === option.value} aria-label={option.label} onChange={() => setPreference(option.value)} />

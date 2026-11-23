@@ -1,0 +1,30 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source ".";
+@source "../Select.tsx";
+@source "../SettingsPage.tsx";
+
+@theme inline {
+  --color-background: var(--surface-panel);
+  --color-foreground: var(--text);
+  --color-muted: var(--surface-sunken);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--surface-hover);
+  --color-accent-foreground: var(--text-strong);
+  --color-primary: var(--action-fill);
+  --color-primary-foreground: var(--action-ink);
+  --color-popover: var(--surface-raised);
+  --color-input: var(--line);
+  --color-border: var(--line);
+  --color-destructive: var(--danger-fill);
+}
+
+.coss-tooltip-layer {
+  z-index: 990;
+  pointer-events: none;
+}
+
+[data-slot="toolbar-button"][data-disabled] {
+  opacity: .45;
+}

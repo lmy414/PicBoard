@@ -5,6 +5,7 @@ import { formatByteSize } from "../content/content-meta";
 import { easeOutCubic } from "../ui/motion";
 import { IconFit } from "../ui/ContentIcons";
 import { IconMinus, IconPlus } from "../ui/Icons";
+import { Toolbar, ToolbarButton, ToolbarSeparator } from "../ui/coss/Primitives";
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 8;
@@ -362,14 +363,14 @@ export function ImageContentPage({ content, onError, toolbarHost, compact = fals
         : "尺寸未知";
 
   const zoomToolbar = (
-    <div className={`cp-image-toolbar${toolbarHost !== undefined ? " is-topbar" : ""}`} role="toolbar" aria-label="图片缩放">
-      <button type="button" title="缩小" aria-label="缩小" onClick={() => zoomBy(1 / ZOOM_STEP)}><IconMinus size={15} /></button>
+    <Toolbar className={`cp-image-toolbar${toolbarHost !== undefined ? " is-topbar" : ""}`} aria-label="图片缩放">
+      <ToolbarButton size="icon-sm" title="缩小" aria-label="缩小" onClick={() => zoomBy(1 / ZOOM_STEP)}><IconMinus size={15} /></ToolbarButton>
       <span ref={percentLabelRef} className="cp-image-percent">{Math.round(viewRef.current.scale * 100)}%</span>
-      <button type="button" title="放大" aria-label="放大" onClick={() => zoomBy(ZOOM_STEP)}><IconPlus size={15} /></button>
-      <span className="cp-image-toolbar-separator" />
-      <button type="button" title="适应窗口" aria-label="适应窗口" onClick={fitToScreen}><IconFit size={15} /><span>适应</span></button>
-      <button type="button" title="原始大小" aria-label="原始大小" onClick={showActualSize}>1:1</button>
-    </div>
+      <ToolbarButton size="icon-sm" title="放大" aria-label="放大" onClick={() => zoomBy(ZOOM_STEP)}><IconPlus size={15} /></ToolbarButton>
+      <ToolbarSeparator className="cp-image-toolbar-separator" />
+      <ToolbarButton size="sm" title="适应窗口" aria-label="适应窗口" onClick={fitToScreen}><IconFit size={15} /><span>适应</span></ToolbarButton>
+      <ToolbarButton size="sm" title="原始大小" aria-label="原始大小" onClick={showActualSize}>1:1</ToolbarButton>
+    </Toolbar>
   );
 
   return (

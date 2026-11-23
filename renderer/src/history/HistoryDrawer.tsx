@@ -5,6 +5,7 @@ import { KIND_LABEL, KIND_ORDER, buildPlacementIndex, contentTitle, matchesConte
 import type { DisplayContentKind } from "../content/content-meta";
 import { IconClipboard, KindIcon } from "../ui/ContentIcons";
 import { IconClose, IconSearch } from "../ui/Icons";
+import { Button, Input, SegmentedControl, SegmentedControlItem } from "../ui/coss/Primitives";
 import { usePresence } from "../ui/motion";
 import { ContentCover, contentCoverSource } from "../library/ContentCover";
 import "./history.css";
@@ -334,7 +335,6 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
     if (!session) return;
     dragRef.current = null;
     if (session.frame !== null) window.cancelAnimationFrame(session.frame);
-    document.body.classList.remove("hist-dragging");
     session.sourceEl.classList.remove("hist-item-dragging");
     if (session.sourceEl.hasPointerCapture(session.pointerId)) {
       session.sourceEl.releasePointerCapture(session.pointerId);
@@ -350,6 +350,7 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
         placed = false;
       }
     }
+    document.body.classList.remove("hist-dragging");
     removeGhost(session.ghost, placed, session);
   };
 
@@ -455,14 +456,14 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
           <div className="hist-title-row">
             <h2 className="hist-title">剪贴板历史</h2>
             <span className="hist-count">{filtered.length}</span>
-            <button type="button" className="hist-close" aria-label="关闭剪贴板历史" title="关闭" onClick={props.onClose}>
+            <Button size="icon-sm" className="hist-close" aria-label="关闭剪贴板历史" title="关闭" onClick={props.onClose}>
               <IconClose size={14} />
-            </button>
+            </Button>
           </div>
 
           <div className="hist-controls">
-            <button
-              type="button"
+            <Button
+              size="sm"
               className={`hist-record${captureEnabled ? "" : " is-paused"}`}
               aria-pressed={captureEnabled}
               title={captureEnabled ? "暂停记录剪贴板" : "恢复记录剪贴板"}
@@ -472,10 +473,10 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
                 <span className="hist-switch-knob" />
               </span>
               {captureEnabled ? "记录中" : "已暂停"}
-            </button>
+            </Button>
             <div className="hist-search">
               <IconSearch size={13} />
-              <input
+              <Input
                 value={query}
                 placeholder="搜索历史"
                 aria-label="搜索剪贴板历史"
@@ -497,20 +498,18 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
             </div>
           </div>
 
-          <div className="hist-kinds" role="group" aria-label="按类型筛选">
-            <button
-              type="button"
+          <SegmentedControl className="hist-kinds" aria-label="按类型筛选">
+            <SegmentedControlItem
               className={`hist-kind-all${kind === "all" ? " active" : ""}`}
               aria-pressed={kind === "all"}
               title="全部类型"
               onClick={() => applyKind("all")}
             >
               全部
-            </button>
+            </SegmentedControlItem>
             {KIND_ORDER.map((entry) => (
-              <button
+              <SegmentedControlItem
                 key={entry}
-                type="button"
                 className={kind === entry ? "active" : ""}
                 aria-pressed={kind === entry}
                 aria-label={KIND_LABEL[entry]}
@@ -518,9 +517,9 @@ export function HistoryDrawer(props: HistoryDrawerProps) {
                 onClick={() => applyKind(entry)}
               >
                 <KindIcon kind={entry} size={13} />
-              </button>
+              </SegmentedControlItem>
             ))}
-          </div>
+          </SegmentedControl>
         </header>
 
         <div className="hist-body">

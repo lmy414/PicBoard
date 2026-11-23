@@ -55,9 +55,9 @@ export function MiniMap({ open, narrow, nodes, cards, viewportRef, offset, zoom,
 
   const navigate = (event: React.PointerEvent, commit: boolean) => {
     const rect = mapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const localX = event.clientX - rect.left;
-    const localY = event.clientY - rect.top;
+    if (!rect?.width || !rect.height) return;
+    const localX = (event.clientX - rect.left) * WIDTH / rect.width;
+    const localY = (event.clientY - rect.top) * HEIGHT / rect.height;
     const point = miniMapToWorld(geometry, localX, localY);
     const element = viewportRef.current;
     const viewWidth = element?.clientWidth ?? 640;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconAlertTriangle, IconCheck, IconClose, IconInfo } from "./Icons";
+import { Button } from "./coss/Primitives";
 
 export type ToastKind = "success" | "error" | "info" | "warning";
 export type ToastMessage = { id: string; kind: ToastKind; message: string };
@@ -68,6 +69,6 @@ function ToastItem({ toast, dismissMs, onClose }: {
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false); }}>
     <Icon className="toast-icon" size={15} />
     <span className="toast-text">{toast.message}</span>
-    <button className="toast-close" type="button" aria-label="关闭通知" onClick={close}><IconClose size={12} /></button>
+    <Button className="toast-close" size="icon-sm" aria-label="关闭通知" onClick={close}><IconClose size={12} /></Button>
   </div>;
 }

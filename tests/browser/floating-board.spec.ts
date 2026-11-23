@@ -5,7 +5,7 @@ import { mkdir } from 'node:fs/promises';
 type Board = {
   calls: { place: Array<{ contentId: string; canvasId: string; point: { x: number; y: number } }>;
     save: Array<{ id: string; name: string; bytes: number; width: number; height: number }>;
-    open: string[]; drags: number };
+    open: string[]; drags: number; viewports: Array<{ id: string; viewport: { x: number; y: number; zoom: number } }> };
   state: { contents: Record<string, unknown>; canvases: Array<{ id: string; nodes: Array<{ id: string; contentId: string }> }> };
 };
 test.use({ reducedMotion: 'reduce' });
@@ -36,7 +36,7 @@ async function assertHitTargets(locator: Locator) {
 }
 
 async function assertFloatingSurfacesDoNotOverlap(page: Page) {
-  const overlaps = await page.locator('.selection-toolbar, .canvas-dock, .canvas-view-dock, .mini-map').evaluateAll(elements => {
+  const overlaps = await page.locator('.selection-toolbar, .canvas-dock, .canvas-view-dock, .mini-map, .history-slot.open.overlay .hist-drawer').evaluateAll(elements => {
     const visible = elements.filter(element => {
       const style = getComputedStyle(element), rect = element.getBoundingClientRect();
       return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
@@ -77,9 +77,10 @@ for (const size of [{ width: 1920, height: 1080 }, { width: 1000, height: 700 },
       expect(Math.abs(boxes.header.top - boxes.shell.top)).toBeLessThanOrEqual(1);
       expect(Math.abs(boxes.canvas.top - boxes.header.bottom), 'canvas starts directly below the 44px title bar').toBeLessThanOrEqual(2);
       await expect(page.locator('.workspace-navigation')).toHaveCount(0);
-      const windowButtons = await page.locator('.topbar-actions > button').all();
-      expect(windowButtons).toHaveLength(3);
-      for (const button of windowButtons) {
+      const windowActions = page.locator('.topbar-actions');
+      for (const name of ['窗口置顶', '最小化窗口', '最大化窗口', '关闭（按设置处理）']) {
+        const button = windowActions.getByRole('button', { name, exact: true });
+        await expect(button).toBeVisible();
         const box = (await button.boundingBox())!;
         expect(box.y).toBeGreaterThanOrEqual(boxes.header.top);
         expect(box.y + box.height).toBeLessThanOrEqual(boxes.header.bottom);
@@ -96,7 +97,18 @@ for (const size of [{ width: 1920, height: 1080 }, { width: 1000, height: 700 },
       await page.getByRole('button', { name: '展开视图工具', exact: true }).click();
       await expect(page.getByRole('button', { name: '网格对齐', exact: true })).toBeVisible();
       const expandedView = (await page.locator('.canvas-view-dock').boundingBox())!;
-      expect(Math.abs(expandedView.x - boxes.canvas.left - 18)).toBeLessThanOrEqual(2);
+      expect(Math.abs(expandedView.x - boxes.canvas.left - 8)).toBeLessThanOrEqual(1);
+      const viewButtons = await page.getByRole('toolbar', { name: '画布视图', exact: true }).getByRole('button').evaluateAll(buttons => (
+        buttons.map(button => {
+          const rect = button.getBoundingClientRect();
+          return { centerX: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom };
+        })
+      ));
+      expect(viewButtons).toHaveLength(6);
+      for (const [index, button] of viewButtons.entries()) {
+        expect(button.centerX).toBeCloseTo(viewButtons[0].centerX, 1);
+        if (index > 0) expect(button.top).toBeGreaterThanOrEqual(viewButtons[index - 1].bottom);
+      }
       const pan = dock.getByRole('button', { name: '平移工具', exact: true });
       const select = dock.getByRole('button', { name: '选择工具', exact: true });
       await pan.click(); await expect(pan).toHaveAttribute('aria-pressed', 'true');
@@ -118,6 +130,106 @@ for (const size of [{ width: 1920, height: 1080 }, { width: 1000, height: 700 },
     });
   }
 }
+
+async function expectToolbarBelow(page: Page, expectedNodes: number) {
+  await expect.poll(() => page.getByRole('group', { name: '选区操作' }).evaluate(toolbar => {
+    const nodes = Array.from(document.querySelectorAll('.canvas-node.selected'), node => node.getBoundingClientRect());
+    const bar = toolbar.getBoundingClientRect();
+    const groupCenter = (Math.min(...nodes.map(node => node.left)) + Math.max(...nodes.map(node => node.right))) / 2;
+    return {
+      count: nodes.length,
+      gap: Math.round(bar.top - Math.max(...nodes.map(node => node.bottom))),
+      centerDifference: Math.round(Math.abs(bar.left + bar.width / 2 - groupCenter)),
+    };
+  })).toEqual({ count: expectedNodes, gap: 10, centerDifference: 0 });
+}
+
+test('selection actions follow the selected node during a drag, pan and zoom and anchor to the bounds of a group', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 850 });
+  await openBoard(page, false);
+  const node = page.locator('[data-node-id="original-node"]');
+  const initial = (await node.boundingBox())!;
+  await page.mouse.move(initial.x + 50, initial.y + 65);
+  await page.mouse.down();
+  await expectToolbarBelow(page, 1);
+  await page.mouse.move(initial.x + 95, initial.y + 90, { steps: 4 });
+  const dragged = (await node.boundingBox())!;
+  expect(dragged.x + dragged.width / 2).toBeCloseTo(initial.x + initial.width / 2 + 45, 0);
+  await expectToolbarBelow(page, 1);
+  await page.mouse.up();
+  await expect(node).not.toHaveClass(/drag-release/);
+
+  const afterDrag = (await node.boundingBox())!;
+  await page.mouse.move(1000, 530);
+  await page.mouse.down({ button: 'middle' });
+  await page.mouse.move(1050, 560, { steps: 4 });
+  await expect.poll(async () => {
+    const panned = (await node.boundingBox())!;
+    return panned.x + panned.width / 2;
+  }).toBeCloseTo(afterDrag.x + afterDrag.width / 2 + 50, 0);
+  await expectToolbarBelow(page, 1);
+  await page.mouse.up({ button: 'middle' });
+
+  await page.mouse.wheel(0, -120);
+  await expect.poll(async () => (await node.boundingBox())!.width).toBeGreaterThan(afterDrag.width + 5);
+  await expectToolbarBelow(page, 1);
+  await page.locator('[data-node-id="note-node"]').click({ modifiers: ['Shift'] });
+  await expectToolbarBelow(page, 2);
+  await page.getByRole('button', { name: '取消选择', exact: true }).click();
+  await expect(page.getByRole('group', { name: '选区操作' })).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`delete confirmation keeps its red fill and white label in ${theme} mode`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await openBoard(page, false);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const node = page.locator('[data-node-id="original-node"]');
+    await node.click();
+    await page.getByRole('group', { name: '选区操作' }).getByRole('button', { name: '操作', exact: true }).click();
+    await page.getByRole('button', { name: '删除内容…', exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: '删除内容？', exact: true });
+    const confirm = dialog.getByRole('button', { name: '删除', exact: true });
+    await expect(confirm).toHaveCSS('background-color', 'rgb(166, 52, 52)');
+    await expect(confirm).toHaveCSS('color', 'rgb(255, 255, 255)');
+    await confirm.hover();
+    await expect(confirm).toHaveCSS('opacity', '0.9');
+    await expect(confirm).toHaveCSS('background-color', 'rgb(166, 52, 52)');
+    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(node).toBeVisible();
+  });
+}
+
+test('the collapsed view toolbar toggles the minimap and remembers the visibility across reloads', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 480 });
+  await page.goto(`${harness}?history=on&keepPreferences=1`);
+  const map = page.getByLabel('画布小地图', { exact: true });
+  const toggle = page.getByRole('button', { name: '小地图', exact: true });
+  await expect(page.getByRole('button', { name: '展开视图工具', exact: true })).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(map).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(map).toBeVisible();
+  await assertFloatingSurfacesDoNotOverlap(page);
+
+  const afterNavigation = async () => page.evaluate(() => (window as unknown as { floatingBoard: Board }).floatingBoard.calls.viewports.at(-1)?.viewport);
+  await map.click({ position: { x: 18, y: 22 } });
+  await expect.poll(afterNavigation).toMatchObject({ zoom: 1 });
+  const viewport = (await afterNavigation())!;
+  expect(Math.hypot(viewport.x, viewport.y)).toBeGreaterThan(10);
+
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(map).toBeVisible();
+  await toggle.click();
+  await expect(map).toHaveCount(0);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto(`${harness}?history=off&keepPreferences=1`);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(map).toHaveCount(0);
+});
 
 async function editAndSave(page: Page) {
   await page.getByRole('button', { name: '编辑图像', exact: true }).click();
@@ -163,6 +275,19 @@ test('a real image edit saved from the library is placed in the active canvas', 
   await screenshot(page, 'save-from-library');
 });
 
+test('the library retains its category filter after returning from an image', async ({ page }) => {
+  await page.setViewportSize({ width: 1320, height: 680 });
+  await page.goto(`${harness}?history=off&sidebar=on`);
+  await page.getByRole('navigation', { name: '工作区导航' }).getByRole('button', { name: '分类库', exact: true }).click();
+  const category = page.getByRole('combobox', { name: '按分类筛选' });
+  await category.click();
+  await page.getByRole('option', { name: '未分类', exact: true }).click();
+  await expect(category).toHaveText('未分类');
+  await page.locator('.lib-card[aria-label="图片：山间灵感.png"]').dblclick();
+  await page.getByRole('button', { name: '返回到分类库', exact: true }).click();
+  await expect(category).toHaveText('未分类');
+});
+
 test('the floating import button opens a file, places it on the board and keeps all dock actions clickable', async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 480 });
   await openBoard(page, false);
@@ -175,12 +300,27 @@ test('the floating import button opens a file, places it on the board and keeps 
   await expect(page.locator('.qib-toast')).toContainText('图片已放到画布');
   await screenshot(page, 'import-720x480');
   await assertHitTargets(page.locator('.canvas-dock button'));
+  await page.getByRole('button', { name: '平移工具', exact: true }).click();
+  await expect(page.getByRole('button', { name: '平移工具', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
-
-
-
-
+test('narrow floating history lets an image drop onto the canvas beneath it', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 480 });
+  await openBoard(page);
+  const history = page.getByRole('complementary', { name: '剪贴板历史面板', exact: true });
+  const item = history.getByRole('button', { name: '图片：山间灵感.png', exact: true });
+  const bounds = (await item.boundingBox())!;
+  await page.mouse.move(bounds.x + 28, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(540, 350, { steps: 8 });
+  await expect(page.locator('body')).toHaveClass(/hist-dragging/);
+  await expect(page.locator('.hist-ghost')).toHaveClass(/is-over-canvas/);
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: Board }).floatingBoard.calls.place))
+    .toContainEqual(expect.objectContaining({ canvasId: 'main', contentId: 'original' }));
+  await expect(page.locator('body')).not.toHaveClass(/hist-dragging/);
+  await expect(history).toBeVisible();
+});
 
 test('720x480 pinned sidebar with history reserves a safe bottom area for both tool capsules', async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 480 });
@@ -190,9 +330,6 @@ test('720x480 pinned sidebar with history reserves a safe bottom area for both t
   await screenshot(page, '720x480-sidebar-history-on');
   const canvas = (await page.locator('.canvas-viewport').boundingBox())!;
   const dock = (await page.locator('.canvas-dock').boundingBox())!;
-  const history = (await page.locator('.hist-drawer').boundingBox())!;
-  const view = (await page.locator('.canvas-view-dock').boundingBox())!;
-  expect(history.y + history.height).toBeLessThanOrEqual(Math.min(dock.y, view.y) - 4);
   expect(dock.x).toBeGreaterThanOrEqual(canvas.x + 8);
   expect(dock.x + dock.width).toBeLessThanOrEqual(canvas.x + canvas.width - 8);
   expect(Math.abs(dock.x + dock.width / 2 - canvas.x - canvas.width / 2)).toBeLessThanOrEqual(2);

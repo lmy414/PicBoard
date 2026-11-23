@@ -9,6 +9,7 @@
 //! only a directory *preference* and that no files are moved (ui lane layout).
 
 import { useId, useState } from "react";
+import { Button, Input } from "./coss/Primitives";
 import "./controls.css";
 
 export interface DirectoryFieldProps {
@@ -58,7 +59,7 @@ export function DirectoryField({ label, value, onChange, disabled }: DirectoryFi
     <div className="qib-field">
       <label className="qib-label" htmlFor={inputId}>{label}</label>
       <div className="qib-directory-row">
-        <input
+        <Input
           id={inputId}
           className={`qib-path-input ${error ? "qib-invalid" : ""}`}
           value={displayPath}
@@ -73,15 +74,16 @@ export function DirectoryField({ label, value, onChange, disabled }: DirectoryFi
             onChange(event.target.value);
           }}
         />
-        <button
+        <Button
           type="button"
+          variant="outline"
           className="qib-pick-button"
           disabled={disabled || busy}
           title="打开系统目录选择器"
           onClick={() => void pick()}
         >
           {busy ? "选择中…" : "选择文件夹"}
-        </button>
+        </Button>
       </div>
       {error ? (
         <span className="qib-directory-status qib-error" role="alert">{error}</span>

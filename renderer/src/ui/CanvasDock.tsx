@@ -1,7 +1,8 @@
 import { useRef, useState, type ReactNode } from "react";
 import { IconFit } from "./ContentIcons";
-import { IconMagnet, IconMinus, IconPlus } from "./Icons";
+import { IconChevronDown, IconMagnet, IconMiniMap, IconMinus, IconPlus } from "./Icons";
 import { Popover } from "./Popover";
+import { Toolbar, ToolbarButton, ToolbarSeparator, Tooltip, TooltipProvider } from "./coss/Primitives";
 import "./canvas-dock.css";
 
 export type CanvasTool = "select" | "pan";
@@ -18,6 +19,8 @@ interface Props {
   zoom: number;
   onZoom(delta: number): void;
   onLocateAll(): void;
+  minimapVisible: boolean;
+  onToggleMinimap(): void;
   showViewControls: boolean;
   disabled: boolean;
 }
@@ -41,30 +44,64 @@ export function CanvasDock(props: Props) {
   const addRef = useRef<HTMLButtonElement>(null);
   const shortcutsRef = useRef<HTMLButtonElement>(null);
   const choose = (action: () => void) => { setMenu(null); action(); };
-  return <div className="canvas-float-layer">
-    {props.showViewControls && <div className={`canvas-view-dock floating-capsule${viewExpanded ? " is-expanded" : ""}`} role="toolbar" aria-label="画布视图">
-      <button type="button" className="dock-view-toggle" aria-label={viewExpanded ? "收起视图工具" : "展开视图工具"} aria-expanded={viewExpanded} title={viewExpanded ? "收起缩放与网格工具" : "展开缩放与网格工具"} onClick={() => setViewExpanded((value) => !value)}><span className="dock-zoom">{Math.round(props.zoom * 100)}%</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={viewExpanded ? "m10 4-4 4 4 4" : "m6 4 4 4-4 4"} /></svg></button>
-      {viewExpanded && <div className="canvas-view-details motion-fade" data-motion="enter">
-        <span className="dock-separator" />
-        <button type="button" className={props.snapToGrid ? "active" : ""} aria-label="网格对齐" title="网格对齐（Alt 临时反转）" aria-pressed={props.snapToGrid} onClick={props.onToggleSnap}><IconMagnet size={17} /></button>
-        <button type="button" aria-label="缩小" title="缩小" onClick={() => props.onZoom(-0.1)}><IconMinus size={16} /></button>
-        <button type="button" aria-label="放大" title="放大" onClick={() => props.onZoom(0.1)}><IconPlus size={16} /></button>
-        <button type="button" aria-label="定位全部节点" title="定位全部节点" onClick={props.onLocateAll}><IconFit size={18} /></button>
-      </div>}
-    </div>}
+  return <TooltipProvider delay={440}>
+    <div className="canvas-float-layer">
+    {props.showViewControls && (
+      <Toolbar className="canvas-view-dock floating-capsule" orientation="vertical" aria-label="画布视图">
+        {viewExpanded && <>
+          <Tooltip side="right" label="网格对齐 · Alt 临时反转">
+            <ToolbarButton aria-label="网格对齐" aria-pressed={props.snapToGrid} onClick={props.onToggleSnap}>
+              <IconMagnet size={17} />
+            </ToolbarButton>
+          </Tooltip>
+          <Tooltip side="right" label="缩小">
+            <ToolbarButton aria-label="缩小" onClick={() => props.onZoom(-0.1)}>
+              <IconMinus size={16} />
+            </ToolbarButton>
+          </Tooltip>
+          <Tooltip side="right" label="放大">
+            <ToolbarButton aria-label="放大" onClick={() => props.onZoom(0.1)}>
+              <IconPlus size={16} />
+            </ToolbarButton>
+          </Tooltip>
+          <Tooltip side="right" label="定位全部节点">
+            <ToolbarButton aria-label="定位全部节点" onClick={props.onLocateAll}>
+              <IconFit size={18} />
+            </ToolbarButton>
+          </Tooltip>
+          <ToolbarSeparator className="view-dock-separator" />
+        </>}
+        <Tooltip side="right" label={viewExpanded ? "收起视图工具" : "展开视图工具"}>
+          <ToolbarButton
+            className="dock-view-toggle"
+            aria-label={viewExpanded ? "收起视图工具" : "展开视图工具"}
+            aria-expanded={viewExpanded}
+            onClick={() => setViewExpanded((expanded) => !expanded)}
+          >
+            <span className="dock-zoom">{Math.round(props.zoom * 100)}%</span>
+            <IconChevronDown size={13} />
+          </ToolbarButton>
+        </Tooltip>
+        <Tooltip side="right" label={props.minimapVisible ? "隐藏小地图" : "显示小地图"}>
+          <ToolbarButton aria-label="小地图" aria-pressed={props.minimapVisible} onClick={props.onToggleMinimap}>
+            <IconMiniMap size={17} />
+          </ToolbarButton>
+        </Tooltip>
+      </Toolbar>
+    )}
     <div className="canvas-dock-position">
-      <div className="canvas-dock floating-capsule" role="toolbar" aria-label="画板工具">
-        <button ref={addRef} type="button" className="dock-add" aria-label="添加内容" title="添加内容 (Shift+A)" aria-expanded={menu === "add"} aria-haspopup="menu" disabled={props.disabled} onClick={() => setMenu(menu === "add" ? null : "add")}><IconPlus size={22} /></button>
-        <span className="dock-separator" />
-        <button type="button" aria-label="选择工具" title="选择 · 拖动空白框选" aria-pressed={props.tool === "select"} onClick={() => props.onToolChange("select")}><DockIcon kind="select" /></button>
-        <button type="button" aria-label="平移工具" title="抓手 · 拖动画布（也可按住 Space）" aria-pressed={props.tool === "pan"} onClick={() => props.onToolChange("pan")}><DockIcon kind="pan" /></button>
-        <button type="button" aria-label="新建富文本节点" title="富文本 · 文字、列表和图片" disabled={props.disabled} onClick={() => props.onCreate("richText")}><DockIcon kind="text" /></button>
-        <button type="button" aria-label="新建链接节点" title="链接" disabled={props.disabled} onClick={() => props.onCreate("link")}><DockIcon kind="link" /></button>
-        <button type="button" aria-label="导入图片到画布" title="导入图片到画布" disabled={props.disabled} onClick={props.onImportImage}><DockIcon kind="image" /></button>
-        <span className="dock-separator" />
-        <button type="button" aria-label={props.historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} title="剪贴板历史" aria-pressed={props.historyOpen} onClick={props.onToggleHistory}><DockIcon kind="history" /></button>
-        <button ref={shortcutsRef} type="button" aria-label="快捷键帮助" title="快捷键帮助" aria-expanded={menu === "shortcuts"} aria-haspopup="dialog" onClick={() => setMenu(menu === "shortcuts" ? null : "shortcuts")}><DockIcon kind="keyboard" /></button>
-      </div>
+      <Toolbar className="canvas-dock floating-capsule" aria-label="画板工具">
+        <Tooltip label="添加内容 · Shift+A"><ToolbarButton ref={addRef} className="dock-add" aria-label="添加内容" aria-expanded={menu === "add"} aria-haspopup="menu" disabled={props.disabled} onClick={() => setMenu(menu === "add" ? null : "add")}><IconPlus size={19} /></ToolbarButton></Tooltip>
+        <ToolbarSeparator className="dock-separator" />
+        <Tooltip label="选择工具"><ToolbarButton aria-label="选择工具" aria-pressed={props.tool === "select"} onClick={() => props.onToolChange("select")}><DockIcon kind="select" /></ToolbarButton></Tooltip>
+        <Tooltip label="平移画布 · Space"><ToolbarButton aria-label="平移工具" aria-pressed={props.tool === "pan"} onClick={() => props.onToolChange("pan")}><DockIcon kind="pan" /></ToolbarButton></Tooltip>
+        <Tooltip label="新建富文本"><ToolbarButton aria-label="新建富文本节点" disabled={props.disabled} onClick={() => props.onCreate("richText")}><DockIcon kind="text" /></ToolbarButton></Tooltip>
+        <Tooltip label="新建链接"><ToolbarButton aria-label="新建链接节点" disabled={props.disabled} onClick={() => props.onCreate("link")}><DockIcon kind="link" /></ToolbarButton></Tooltip>
+        <Tooltip label="导入图片"><ToolbarButton aria-label="导入图片到画布" disabled={props.disabled} onClick={props.onImportImage}><DockIcon kind="image" /></ToolbarButton></Tooltip>
+        <ToolbarSeparator className="dock-separator" />
+        <Tooltip label="剪贴板历史"><ToolbarButton aria-label={props.historyOpen ? "收起剪贴板历史" : "展开剪贴板历史"} aria-pressed={props.historyOpen} onClick={props.onToggleHistory}><DockIcon kind="history" /></ToolbarButton></Tooltip>
+        <Tooltip label="快捷键帮助"><ToolbarButton ref={shortcutsRef} aria-label="快捷键帮助" aria-expanded={menu === "shortcuts"} aria-haspopup="dialog" onClick={() => setMenu(menu === "shortcuts" ? null : "shortcuts")}><DockIcon kind="keyboard" /></ToolbarButton></Tooltip>
+      </Toolbar>
     </div>
     <Popover open={menu === "add"} anchor={addRef.current} onClose={() => setMenu(null)} width={208} className="dock-add-menu" panelProps={{ role: "menu", "aria-label": "添加到画布" }}>
       <button type="button" role="menuitem" onClick={() => choose(() => props.onCreate("richText"))}><DockIcon kind="text" />富文本节点</button>
@@ -76,5 +113,6 @@ export function CanvasDock(props: Props) {
       <strong>画板快捷键</strong>
       <dl><div><dt>平移画布</dt><dd>Space + 拖动 / 中键</dd></div><div><dt>缩放</dt><dd>滚轮</dd></div><div><dt>添加内容</dt><dd>Shift + A / 右键</dd></div><div><dt>粘贴到画布</dt><dd>Ctrl + V</dd></div><div><dt>多选</dt><dd>Shift + 单击</dd></div><div><dt>打开内容</dt><dd>双击 / Enter</dd></div><div><dt>删除所选</dt><dd>Delete</dd></div><div><dt>返回上级</dt><dd>Esc</dd></div></dl>
     </Popover>
-  </div>;
+    </div>
+  </TooltipProvider>;
 }

@@ -64,6 +64,8 @@ for (const key of Object.keys(lock.packages ?? {}).sort()) {
 }
 const bloub = join(root, 'renderer/src/third-party/bloub');
 records.push({ ecosystem: 'vendored', name: 'bloub', directory: 'bloub', files: collect(bloub, join(out, 'bloub')) });
+const coss = join(root, 'renderer/src/ui/coss');
+records.push({ ecosystem: 'vendored', name: 'coss ui', license: 'MIT', repository: 'https://github.com/cosscom/ui', directory: 'coss-ui', files: collect(coss, join(out, 'coss-ui')) });
 writeFileSync(join(out, 'DEPENDENCIES.json'), JSON.stringify(records, null, 2));
 writeFileSync(join(out, 'README.txt'), 'Third-party notices collected from locked dependencies for the Windows x64 build.\nIncludes build-time dependencies; inclusion does not claim each is dynamically shipped.\nSee DEPENDENCIES.json and each package directory. System Windows/WebView2 components are not bundled.\n');
 console.log(`Collected notices for ${records.length} dependencies; ${records.filter(r => !r.files.length).length} packages declare a license but ship no root notice file.`);

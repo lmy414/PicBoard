@@ -5,6 +5,7 @@ import { KIND_LABEL, buildPlacementIndex, contentTitle, formatByteSize, formatTi
 import { IconArrowLeft, IconCanvas, IconCopy, IconTag, KindIcon } from "../ui/ContentIcons";
 import { IconDots, IconInfo } from "../ui/Icons";
 import { Popover } from "../ui/Popover";
+import { Toolbar, ToolbarButton } from "../ui/coss/Primitives";
 import { ImageContentPage } from "./ImageContentPage";
 import { ImageEditor } from "./ImageEditor";
 import { LinkContentPage } from "./LinkContentPage";
@@ -209,16 +210,17 @@ export function ContentPage(props: ContentPageProps) {
   };
 
   const toolbar = (
-      <div className="cp-toolbar" role="toolbar" aria-label="内容工具">
+      <Toolbar className="cp-toolbar" aria-label="内容工具">
         {props.toolbarHost === undefined && (
-          <button
+          <ToolbarButton
+            size="sm"
             className="cp-back"
             title="返回 (Esc)"
             onClick={() => void closePage()}
           >
             <IconArrowLeft size={15} />
             <span>返回</span>
-          </button>
+          </ToolbarButton>
         )}
           <span className="cp-kind-chip">
             <KindIcon kind={content.kind} size={13} />
@@ -230,15 +232,16 @@ export function ContentPage(props: ContentPageProps) {
               {category.name}
             </span>
           ) : null}
-          <button type="button" ref={infoButtonRef} className={`cp-action cp-info-trigger${infoOpen ? " active" : ""}`} title="内容信息" aria-label="内容信息" aria-expanded={infoOpen} aria-haspopup="dialog" onClick={() => setInfoOpen((open) => !open)}><IconInfo size={14} /><span>信息</span></button>
+          <ToolbarButton size="sm" ref={infoButtonRef} className={`cp-action cp-info-trigger${infoOpen ? " active" : ""}`} title="内容信息" aria-label="内容信息" aria-expanded={infoOpen} aria-haspopup="dialog" onClick={() => setInfoOpen((open) => !open)}><IconInfo size={14} /><span>信息</span></ToolbarButton>
           <span className="cp-toolbar-grow" />
-          {content.kind === "image" && <button type="button" className="cp-action" onClick={() => { setInfoOpen(false); setEditingImage(true); }}>编辑图像</button>}
+          {content.kind === "image" && <ToolbarButton size="sm" className="cp-action" onClick={() => { setInfoOpen(false); setEditingImage(true); }}>编辑图像</ToolbarButton>}
           {editable ? <SaveStatusChip status={saveStatus} /> : null}
-          <button className="cp-action" onClick={() => props.onCopy([content.id])} title="复制到剪贴板" aria-label="复制">
+          <ToolbarButton size="sm" className="cp-action" onClick={() => props.onCopy([content.id])} title="复制到剪贴板" aria-label="复制">
             <IconCopy size={14} />
             <span>复制</span>
-          </button>
-          <button
+          </ToolbarButton>
+          <ToolbarButton
+            size="icon-sm"
             className="cp-action cp-action-icon"
             aria-label="内容操作"
             aria-haspopup="menu"
@@ -246,8 +249,8 @@ export function ContentPage(props: ContentPageProps) {
             onClick={(event) => props.onQuickActions(event.currentTarget, content.id)}
           >
             <IconDots size={16} />
-          </button>
-      </div>
+          </ToolbarButton>
+      </Toolbar>
   );
 
   return (

@@ -78,7 +78,11 @@ test('JPEG flattens transparency to white and cancel protects unsaved edits', as
   await expect(page.getByRole('button',{name:'保存副本'})).toBeEnabled();
   await page.getByRole('button',{name:'旋转',exact:true}).click();
   await page.getByRole('button',{name:'取消',exact:true}).click();
-  await expect(page.getByRole('alertdialog',{name:'放弃图片编辑'})).toBeVisible();
+  const discard = page.getByRole('alertdialog',{name:'放弃图片编辑'});
+  await expect(discard).toBeVisible();
+  const discardButton = discard.getByRole('button', { name: '放弃修改', exact: true });
+  await expect(discardButton).toHaveCSS('background-color', 'rgb(166, 52, 52)');
+  await expect(discardButton).toHaveCSS('color', 'rgb(255, 255, 255)');
   expect(await page.evaluate(()=>(window as any).cancelled)).toBeUndefined();
   await page.getByRole('button',{name:'继续编辑',exact:true}).click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);

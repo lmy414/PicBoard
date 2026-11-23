@@ -11,8 +11,8 @@
 
 .lib-toolbar {
   flex: 0 0 auto;
-  padding: 4px 12px;
-  background: var(--surface-panel);
+  padding: 4px 8px;
+  min-width: 0;
 }
 
 .lib-toolbar-row {
@@ -100,7 +100,7 @@
 }
 .lib-kind-chips button:hover { background: var(--surface-hover); box-shadow: var(--elev-hover-sm); color: var(--text); }
 .lib-kind-chips button.active {
-  background: var(--surface-pressed);
+  background: var(--surface-panel);
   color: var(--text);
   box-shadow: var(--elev-1);
 }
@@ -115,33 +115,8 @@
   flex: 0 0 auto;
 }
 
-.lib-select-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-.lib-select-wrap svg {
-  position: absolute;
-  right: 8px;
-  pointer-events: none;
-  color: var(--text-faint);
-}
-.lib-select {
-  appearance: none;
-  height: 26px;
-  max-width: 168px;
-  padding: 0 26px 0 10px;
-  border: 0;
-  border-radius: var(--radius-s);
-  background: var(--surface-panel);
-  box-shadow: var(--elev-1);
-  color: var(--text-muted);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: box-shadow var(--motion-fast) var(--motion-ease-out), color var(--motion-fast) ease;
-}
-.lib-select:hover { box-shadow: var(--elev-hover); color: var(--text); }
-.lib-select:active { background: var(--surface-press-fill); box-shadow: var(--elev-inset-sm); }
+.lib-filters .qib-field { width: 104px; }
+.lib-filters .qib-select-trigger:hover { border-color: var(--line-strong); }
 
 /* Summary */
 .lib-summary {
@@ -384,7 +359,7 @@
   .lib-kind-chips button { padding: 0 6px; }
   .lib-search { max-width: 170px; }
   .lib-filters { gap: 4px; }
-  .lib-select { max-width: 100px; }
+  .lib-filters .qib-field { width: 88px; }
 }
 
 .lib-grid::-webkit-scrollbar { width: 10px; }
