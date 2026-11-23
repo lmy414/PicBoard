@@ -109,6 +109,9 @@
   };
   window.imageBoard = host;
   initializeTheme();
-  createRoot(document.getElementById('root')).render(React.createElement(App));
+  const tray = parameters.get('surface') === 'tray';
+  if (tray) document.documentElement.dataset.surface = 'tray';
+  const Surface = tray ? (await import('/renderer/src/tray/TrayPanel.tsx')).default : App;
+  createRoot(document.getElementById('root')).render(React.createElement(Surface));
 </script>
 </body></html>

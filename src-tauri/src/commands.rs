@@ -18,7 +18,7 @@ use crate::storage::ImageBoardStorage;
 use crate::window_controller::WindowController;
 use crate::SharedStorage;
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 fn with_storage<T>(
     storage: &State<'_, SharedStorage>,
@@ -637,8 +637,9 @@ pub fn snap_window_to_zone(
 }
 
 #[tauri::command]
-pub fn start_titlebar_drag(window: State<'_, WindowController>) -> Result<(), AppError> {
-    window.start_titlebar_drag()
+pub fn start_titlebar_drag(win: WebviewWindow) -> Result<(), AppError> {
+    win.start_dragging()?;
+    Ok(())
 }
 
 /// The main window's explicit edge/corner hot zones hand off to native sizing.

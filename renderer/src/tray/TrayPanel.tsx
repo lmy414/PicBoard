@@ -799,11 +799,21 @@ export function TrayPanel(): JSX.Element {
     <div className="tray-panel">
       <div className="tray-card">
         <header className="tray-head">
-          <span className="tray-logo" aria-hidden="true">
-            <IconClipboard size={14} />
-          </span>
-          <strong className="tray-name">PicBoard</strong>
-          <span className="tray-head-grow" />
+          <div
+            className="tray-head-drag"
+            onMouseDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              void window.imageBoard.startTitlebarDrag().catch((error: unknown) =>
+                showErrorRef.current(hostErrorMessage(error, "拖动窗口失败")),
+              );
+            }}
+          >
+            <span className="tray-logo" aria-hidden="true">
+              <IconClipboard size={14} />
+            </span>
+            <strong className="tray-name">PicBoard</strong>
+          </div>
           <Button
             size="sm"
             className={`tray-icon-button${captureEnabled ? "" : " is-paused"}`}

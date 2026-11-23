@@ -145,16 +145,18 @@ test("auto-start launches silently into the tray", async () => {
 
 test("window gestures use one native maximize state and callbacks remain non-blocking", async () => {
   const controller = await source("src-tauri/src/window_controller.rs");
-  const toggle = branchBetween(controller, "pub fn toggle_maximized", "pub fn start_titlebar_drag");
+  const toggle = branchBetween(controller, "pub fn toggle_maximized", "pub fn start_resize_dragging");
   // Windows owns the restore placement for both app buttons and OS shortcuts.
   assert.match(toggle, /win\.is_maximized\(\)/);
   assert.match(toggle, /win\.maximize\(\)/);
   assert.match(toggle, /win\.unmaximize\(\)/);
   assert.doesNotMatch(toggle, /set_logical_bounds|\.lock\(/);
 
-  const drag = branchBetween(controller, "pub fn start_titlebar_drag", "pub fn start_resize_dragging");
+  const commands = await source("src-tauri/src/commands.rs");
+  const drag = branchBetween(commands, "pub fn start_titlebar_drag", "pub fn start_resize_dragging");
+  assert.match(drag, /\(win:\s*WebviewWindow\)/);
   assert.match(drag, /win\.start_dragging\(\)/);
-  assert.doesNotMatch(drag, /set_logical_bounds|\.lock\(/);
+  assert.doesNotMatch(drag, /main_window|set_logical_bounds|\.lock\(/);
   const sizing = branchBetween(controller, "pub fn start_resize_dragging", "pub fn request_teardown");
   assert.match(sizing, /start_resize_dragging\(direction\)/);
   assert.match(sizing, /win\.is_maximized\(\)/);

@@ -295,15 +295,6 @@ impl WindowController {
         Ok(maximized)
     }
 
-    /// The native HTCAPTION loop owns drag-to-restore, the cursor grab point,
-    /// mixed-DPI monitor transitions and Aero snap. Moving a work-area-sized
-    /// normal window by hand cannot provide those Windows semantics.
-    pub fn start_titlebar_drag(&self) -> Result<(), AppError> {
-        let win = main_window(&self.inner.handle)?;
-        win.start_dragging()?;
-        Ok(())
-    }
-
     /// Start the OS sizing loop, keeping content pointer handlers out of the
     /// gesture. This always targets main; tray sizing/anchoring is untouched.
     pub fn start_resize_dragging(&self, direction: &str) -> Result<(), AppError> {

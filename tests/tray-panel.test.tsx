@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Mock } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AppState, ContentRecord } from "../shared/image-board";
 import TrayPanel from "../renderer/src/tray/TrayPanel";
 
@@ -51,6 +51,7 @@ interface HostMocks {
   classifyContents: Mock;
   createCategory: Mock;
   getContentBody: Mock;
+  startTitlebarDrag: Mock;
   showMainWindow: Mock;
   hideTrayPanel: Mock;
   quitApp: Mock;
@@ -89,6 +90,7 @@ beforeEach(() => {
       snapToGrid: false,
       gridSize: 24 as const,
     })),
+    startTitlebarDrag: vi.fn(async () => {}),
     showMainWindow: vi.fn(async () => {}),
     hideTrayPanel: vi.fn(async () => {}),
     quitApp: vi.fn(async () => {}),
@@ -224,4 +226,17 @@ test("the capture toggle records or pauses via desktop settings", async () => {
   await waitFor(() => expect(document.querySelectorAll(".tray-item")).toHaveLength(2));
   fireEvent.click(document.querySelector<HTMLButtonElement>('.tray-head .tray-icon-button[aria-pressed]')!);
   await waitFor(() => expect(mocks.setDesktopSettings).toHaveBeenCalledWith({ captureEnabled: false }));
+});
+
+test("the tray title starts native dragging with the left mouse button", async () => {
+  render(<TrayPanel />);
+  await screen.findByText("共 2 条", { exact: false });
+
+  const title = screen.getByText("PicBoard", { exact: true });
+  fireEvent.mouseDown(title, { button: 2 });
+  fireEvent.mouseDown(screen.getByRole("button", { name: "设置" }), { button: 0 });
+  expect(mocks.startTitlebarDrag).not.toHaveBeenCalled();
+
+  fireEvent.mouseDown(title, { button: 0 });
+  expect(mocks.startTitlebarDrag).toHaveBeenCalledTimes(1);
 });
