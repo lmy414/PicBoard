@@ -270,12 +270,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // system dismisses it, like any tray flyout). The hide is deferred to a
     // worker thread: window APIs must not run re-entrantly inside a window
     // event callback.
-    let blur_panel = tray_panel.clone();
+    let blur_controller = window_controller.clone();
     tray_panel.on_window_event(move |event| {
         if matches!(event, tauri::WindowEvent::Focused(false)) {
-            let panel = blur_panel.clone();
+            let controller = blur_controller.clone();
             crate::platform::spawn_worker("picboard-tray-blur", move || {
-                let _ = panel.hide();
+                if let Err(error) = controller.dismiss_unfocused_tray() {
+                    eprintln!("[tray] focus dismissal failed: {error}");
+                }
             });
         }
     });
@@ -313,9 +315,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Intercept close requests: float/tray prevent the close and run their
-    // own action; quit lets the window close naturally.
-    crate::desktop::install_close_behavior(&window)?;
+    crate::desktop::install_close_behavior(&window);
+    crate::desktop::install_close_behavior(&tray_panel);
 
     // Global hotkey: summon/dismiss the main window from anywhere. A conflict
     // (another app owns the combo) degrades to "no hotkey", never a crash.
@@ -323,11 +324,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
         if let Err(error) = app.global_shortcut().on_shortcut("ctrl+shift+space", |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
-                if let Some(controller) = app.try_state::<crate::window_controller::WindowController>() {
-                    if let Err(error) = controller.toggle_main_visibility() {
-                        eprintln!("[shortcut] toggle failed: {error}");
+                let app = app.clone();
+                crate::platform::spawn_worker("picboard-shortcut", move || {
+                    if let Some(controller) = app.try_state::<crate::window_controller::WindowController>() {
+                        if let Err(error) = controller.toggle_main_visibility() {
+                            eprintln!("[shortcut] toggle failed: {error}");
+                        }
                     }
-                }
+                });
             }
         }) {
             eprintln!("[shortcut] global hotkey unavailable: {error}");

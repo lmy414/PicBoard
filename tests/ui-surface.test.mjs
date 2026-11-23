@@ -19,8 +19,9 @@ test("settings page keeps the tray-era surface connected", async () => {
   assert.match(settingsPage, /已放到画布上或已分类的内容不会被自动清理/);
   assert.match(settingsPage, /分类管理/);
   assert.match(settingsPage, /文件路径/);
-  assert.match(shell, /收纳到托盘/);
-  assert.match(shell, /退出程序/);
+  assert.match(shell, /收起到托盘/);
+  assert.match(shell, /返回小窗/);
+  assert.match(shell, /直接退出/);
   assert.doesNotMatch(shell, /悬浮球|"float"/);
   assert.doesNotMatch(app, /收起为悬浮球|悬浮球|CollapsedBall|BloubBall/);
   assert.doesNotMatch(app, /drag-in|importImages|importText|ACCEPTED_EXTENSIONS/);

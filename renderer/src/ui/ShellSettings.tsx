@@ -2,14 +2,14 @@
 //! component reads and updates host settings itself and owns its loading and
 //! failure handling. Compact layout for the Settings page.
 //!
-//! Three mutually-exclusive close-behavior choices plus an auto-start switch,
+//! Main-window and tray-panel close choices plus an auto-start switch,
 //! shown only when the host reports it is available (dev builds never register
 //! auto-start). Every host result is applied from what the host actually
 //! persisted; nothing is faked. No production stub ships: when the host
 //! methods are missing at runtime, this component shows its own error state.
 
 import { useEffect, useRef, useState } from "react";
-import type { CloseBehavior, DesktopSettings, DesktopSettingsPatch, ImageBoardApi } from "../../../shared/image-board";
+import type { CloseBehavior, DesktopSettings, DesktopSettingsPatch, ImageBoardApi, TrayCloseBehavior } from "../../../shared/image-board";
 import "./controls.css";
 
 type HostWindow = Window & { imageBoard?: ImageBoardApi };
@@ -18,10 +18,49 @@ type HostWindow = Window & { imageBoard?: ImageBoardApi };
  *  is handled by this component instead of crashing the app. */
 const host = () => (window as unknown as HostWindow).imageBoard;
 
-const CLOSE_OPTIONS: Array<{ value: CloseBehavior; label: string; hint: string }> = [
-  { value: "tray", label: "收纳到托盘", hint: "关闭后隐藏到系统托盘，可从托盘重新打开（默认）" },
-  { value: "quit", label: "退出程序", hint: "结束全部进程" },
+type CloseOption<Behavior extends CloseBehavior> = { value: Behavior; label: string; hint: string };
+
+const hideOption = { value: "tray", label: "收起到托盘", hint: "隐藏窗口，继续在后台运行" } as const;
+const quitOption = { value: "quit", label: "直接退出", hint: "退出 PicBoard，停止记录" } as const;
+const TRAY_CLOSE_OPTIONS: CloseOption<TrayCloseBehavior>[] = [hideOption, quitOption];
+const MAIN_CLOSE_OPTIONS: CloseOption<CloseBehavior>[] = [
+  hideOption,
+  { value: "panel", label: "返回小窗", hint: "隐藏主窗口，在原位置显示小窗" },
+  quitOption,
 ];
+
+function CloseChoices<Behavior extends CloseBehavior>(props: {
+  label: string;
+  options: CloseOption<Behavior>[];
+  selected: Behavior;
+  disabled: boolean;
+  onChange(value: Behavior): void;
+}) {
+  const { label, options, selected, disabled, onChange } = props;
+  return (
+    <div>
+      <span className="qib-choice-label">{label}</span>
+      <div className="qib-close-choice" role="radiogroup" aria-label={label} data-options={options.length}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-label={option.label}
+            aria-checked={selected === option.value}
+            disabled={disabled}
+            className="qib-choice"
+            onClick={() => selected !== option.value && onChange(option.value)}
+          >
+            <span className="qib-choice-text">{option.label}</span>
+            {selected === option.value && <span className="qib-choice-tick" aria-hidden="true" />}
+            <small>{option.hint}</small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function ShellSettings() {
   const [settings, setSettings] = useState<DesktopSettings | null>(null);
@@ -102,11 +141,6 @@ export function ShellSettings() {
     return <div className="qib-shell-settings"><p className="qib-shell-note">正在读取桌面设置…</p></div>;
   }
 
-  const chooseCloseBehavior = (behavior: CloseBehavior) => {
-    if (behavior === settings.closeBehavior || busy) return;
-    void update({ closeBehavior: behavior });
-  };
-
   const toggleAutoStart = (next: boolean) => {
     if (!settings.autoStartAvailable || busy || next === settings.autoStart) return;
     void update({ autoStart: next });
@@ -114,27 +148,20 @@ export function ShellSettings() {
 
   return (
     <div className="qib-shell-settings">
-      <div>
-        <span className="qib-choice-label">关闭窗口时</span>
-        <div className="qib-close-choice" role="radiogroup" aria-label="关闭窗口时">
-          {CLOSE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              className="qib-choice"
-              aria-checked={settings.closeBehavior === option.value}
-              disabled={busy}
-              title={`${option.label}：${option.hint}${settings.closeBehavior === option.value ? '（当前）' : ''}`}
-              onClick={() => chooseCloseBehavior(option.value)}
-            >
-              <span className="qib-choice-text">{option.label}</span>
-              {settings.closeBehavior === option.value && <span className="qib-choice-tick" aria-hidden="true" />}
-              <small>{option.hint}</small>
-            </button>
-          ))}
-        </div>
-      </div>
+      <CloseChoices
+        label="关闭主窗口时"
+        options={MAIN_CLOSE_OPTIONS}
+        selected={settings.closeBehavior}
+        disabled={busy}
+        onChange={(closeBehavior) => void update({ closeBehavior })}
+      />
+      <CloseChoices
+        label="关闭小窗时"
+        options={TRAY_CLOSE_OPTIONS}
+        selected={settings.trayCloseBehavior}
+        disabled={busy}
+        onChange={(trayCloseBehavior) => void update({ trayCloseBehavior })}
+      />
       <label className="qib-toggle-row" onMouseDown={(event) => { if (!settings.autoStartAvailable || busy) return; event.preventDefault(); }}>
         <input
           type="checkbox"

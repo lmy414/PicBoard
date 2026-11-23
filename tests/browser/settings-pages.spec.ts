@@ -126,7 +126,7 @@ test('settings entry, 8 independent sections, real option interactions, and retu
   await expect(page.locator('.settings-view h1')).toHaveText('画布');
   await expect(page.locator('.settings-view .settings-section')).toHaveCount(1);
   await expect(page.getByRole('group', { name: '画布图案' })).toBeVisible();
-  await expect(page.getByRole('radiogroup', { name: '关闭窗口时' })).toHaveCount(0);
+  await expect(page.getByRole('radiogroup', { name: '关闭主窗口时' })).toHaveCount(0);
   await expect(page.getByRole('radiogroup', { name: '界面主题' })).toHaveCount(0);
   const gridTrigger = page.getByRole('combobox', { name: '网格间距', exact: true });
   await expect(gridTrigger).toContainText('24');
@@ -168,20 +168,30 @@ test('settings entry, 8 independent sections, real option interactions, and retu
   await expect(pathInput).toHaveValue('E:\\PicBoard-test\\images');
   expect(await page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.calls.directories)).toEqual(['quick-image-board']);
 
-  // 4. 窗口与启动 (Window & Startup): radio options 收纳到托盘 / 退出程序
   await nav.getByRole('button', { name: '窗口与启动', exact: true }).click();
   await expect(page.locator('.settings-view h1')).toHaveText('窗口与启动');
   await expect(page.locator('.settings-view .settings-section')).toHaveCount(1);
   await expect(pathInput).toHaveCount(0);
-  const closeGroup = page.getByRole('radiogroup', { name: '关闭窗口时' });
+  const closeGroup = page.getByRole('radiogroup', { name: '关闭主窗口时' });
+  const trayCloseGroup = page.getByRole('radiogroup', { name: '关闭小窗时' });
   await expect(closeGroup).toBeVisible();
-  const trayRadio = closeGroup.getByRole('radio', { name: '收纳到托盘' });
-  const quitRadio = closeGroup.getByRole('radio', { name: '退出程序' });
+  const trayRadio = closeGroup.getByRole('radio', { name: '收起到托盘' });
+  const panelRadio = closeGroup.getByRole('radio', { name: '返回小窗' });
+  const quitRadio = closeGroup.getByRole('radio', { name: '直接退出' });
+  const trayQuitRadio = trayCloseGroup.getByRole('radio', { name: '直接退出' });
   await expect(trayRadio).toBeVisible();
   await expect(quitRadio).toBeVisible();
-  await trayRadio.click();
   await expect(trayRadio).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.desktopSettings.closeBehavior)).toBe('tray');
+  await panelRadio.click();
+  await expect(panelRadio).toHaveAttribute('aria-checked', 'true');
+  await trayQuitRadio.click();
+  await expect(trayQuitRadio).toHaveAttribute('aria-checked', 'true');
+  await expect(panelRadio).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.calls.settings.slice(-2))).toEqual([
+    { closeBehavior: 'panel' },
+    { trayCloseBehavior: 'quit' },
+  ]);
   await quitRadio.click();
   await expect(quitRadio).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => page.evaluate(() => (window as unknown as { floatingBoard: FloatingBoardHarness }).floatingBoard.desktopSettings.closeBehavior)).toBe('quit');

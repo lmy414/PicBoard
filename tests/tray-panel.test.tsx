@@ -212,12 +212,15 @@ test("drops older revisions and applies newer pushes", async () => {
   await waitFor(() => expect(card("c")).toBeTruthy());
 });
 
-test("footer buttons open the main window and quit", async () => {
+test("footer buttons open the main window, hide to tray, or quit", async () => {
   render(<TrayPanel />);
   await waitFor(() => expect(document.querySelectorAll(".tray-item")).toHaveLength(2));
   fireEvent.click(document.querySelector<HTMLButtonElement>(".tray-foot-main")!);
   await waitFor(() => expect(mocks.showMainWindow).toHaveBeenCalledWith(undefined));
-  fireEvent.click(document.querySelector<HTMLButtonElement>(".tray-foot-quit")!);
+  fireEvent.click(screen.getByRole("button", { name: "收起到托盘" }));
+  await waitFor(() => expect(mocks.hideTrayPanel).toHaveBeenCalledTimes(1));
+  expect(mocks.quitApp).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "退出 PicBoard" }));
   await waitFor(() => expect(mocks.quitApp).toHaveBeenCalled());
 });
 

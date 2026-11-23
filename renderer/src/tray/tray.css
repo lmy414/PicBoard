@@ -532,8 +532,9 @@
 .tray-foot-main {
   flex: 1 1 auto;
 }
-.tray-foot-quit {
+.tray-foot-secondary {
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* ---- context menu ------------------------------------------------------ */

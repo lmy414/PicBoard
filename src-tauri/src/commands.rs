@@ -453,7 +453,7 @@ pub fn close_window(window: State<'_, WindowController>) -> Result<(), AppError>
 /// Show/unminimize/focus the main window, hide the tray panel and optionally
 /// navigate the renderer.
 #[tauri::command]
-pub fn show_main_window(
+pub async fn show_main_window(
     app: AppHandle,
     window: State<'_, WindowController>,
     navigate: Option<MainNavigation>,
@@ -463,7 +463,7 @@ pub fn show_main_window(
 
 /// Hide the tray flyout panel.
 #[tauri::command]
-pub fn hide_tray_panel(window: State<'_, WindowController>) -> Result<(), AppError> {
+pub async fn hide_tray_panel(window: State<'_, WindowController>) -> Result<(), AppError> {
     window.hide_tray_panel()
 }
 
@@ -492,6 +492,7 @@ fn settings_dto(desktop: &State<'_, crate::desktop::DesktopState>) -> DesktopSet
     let prefs = desktop.current();
     DesktopSettingsDto {
         close_behavior: prefs.close_behavior,
+        tray_close_behavior: prefs.tray_close_behavior,
         auto_start: prefs.auto_start,
         auto_start_available: desktop.auto_start.availability().available,
         capture_enabled: prefs.capture_enabled,
@@ -513,20 +514,16 @@ pub fn set_desktop_settings(
     storage: State<'_, SharedStorage>,
     patch: Option<Value>,
 ) -> Result<DesktopSettingsDto, AppError> {
-    use crate::desktop::{CloseBehavior, GridSize, HistoryRetentionDays};
+    use crate::desktop::{CloseBehavior, GridSize, HistoryRetentionDays, SettingsPatch, TrayCloseBehavior};
     let patch = patch.unwrap_or_else(|| json!({}));
-    let mut close_behavior: Option<CloseBehavior> = None;
-    let mut auto_start: Option<bool> = None;
-    let mut capture_enabled: Option<bool> = None;
-    let mut history_retention_days: Option<HistoryRetentionDays> = None;
-    let mut snap_to_grid: Option<bool> = None;
-    let mut grid_size: Option<GridSize> = None;
+    let mut settings = SettingsPatch::default();
     if let Some(value) = patch.get("closeBehavior") {
         let behavior = value
             .as_str()
             .ok_or_else(|| AppError::message("closeBehavior 必须是字符串"))?;
-        close_behavior = Some(match behavior {
+        settings.close_behavior = Some(match behavior {
             "tray" => CloseBehavior::Tray,
+            "panel" => CloseBehavior::Panel,
             "quit" => CloseBehavior::Quit,
             _ => {
                 return Err(AppError::message(format!(
@@ -535,15 +532,29 @@ pub fn set_desktop_settings(
             }
         });
     }
+    if let Some(value) = patch.get("trayCloseBehavior") {
+        let behavior = value
+            .as_str()
+            .ok_or_else(|| AppError::message("trayCloseBehavior 必须是字符串"))?;
+        settings.tray_close_behavior = Some(match behavior {
+            "tray" => TrayCloseBehavior::Tray,
+            "quit" => TrayCloseBehavior::Quit,
+            _ => {
+                return Err(AppError::message(format!(
+                    "未知的 trayCloseBehavior：{behavior}"
+                )))
+            }
+        });
+    }
     if let Some(value) = patch.get("autoStart") {
-        auto_start = Some(
+        settings.auto_start = Some(
             value
                 .as_bool()
                 .ok_or_else(|| AppError::message("autoStart 必须是布尔值"))?,
         );
     }
     if let Some(value) = patch.get("captureEnabled") {
-        capture_enabled = Some(
+        settings.capture_enabled = Some(
             value
                 .as_bool()
                 .ok_or_else(|| AppError::message("captureEnabled 必须是布尔值"))?,
@@ -554,10 +565,10 @@ pub fn set_desktop_settings(
             .as_u64()
             .and_then(|days| u32::try_from(days).ok())
             .ok_or_else(|| AppError::message("历史保留时间无效"))?;
-        history_retention_days = Some(HistoryRetentionDays::new(days)?);
+        settings.history_retention_days = Some(HistoryRetentionDays::new(days)?);
     }
     if let Some(value) = patch.get("snapToGrid") {
-        snap_to_grid = Some(
+        settings.snap_to_grid = Some(
             value
                 .as_bool()
                 .ok_or_else(|| AppError::message("snapToGrid 必须是布尔值"))?,
@@ -568,17 +579,9 @@ pub fn set_desktop_settings(
             .as_u64()
             .and_then(|size| u32::try_from(size).ok())
             .ok_or_else(|| AppError::message("网格间距无效"))?;
-        grid_size = Some(GridSize::new(size)?);
+        settings.grid_size = Some(GridSize::new(size)?);
     }
-    let (prefs, change) = crate::desktop::update_settings(
-        &desktop,
-        close_behavior,
-        auto_start,
-        capture_enabled,
-        history_retention_days,
-        snap_to_grid,
-        grid_size,
-    )?;
+    let (prefs, change) = crate::desktop::update_settings(&app, &desktop, settings)?;
     // The layout engine reads these on every placement/move.
     with_storage(&storage, |store| {
         store.set_layout_settings(prefs.snap_to_grid, prefs.grid_size.size());

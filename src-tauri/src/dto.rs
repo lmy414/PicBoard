@@ -279,6 +279,7 @@ pub struct CopyResult {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettingsDto {
     pub close_behavior: crate::desktop::CloseBehavior,
+    pub tray_close_behavior: crate::desktop::TrayCloseBehavior,
     pub auto_start: bool,
     pub auto_start_available: bool,
     pub capture_enabled: bool,

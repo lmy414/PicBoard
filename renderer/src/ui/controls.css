@@ -480,6 +480,10 @@
   gap: 6px;
 }
 
+.qib-close-choice[data-options="2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .qib-choice {
   box-sizing: border-box;
   position: relative;

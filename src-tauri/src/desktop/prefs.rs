@@ -33,6 +33,7 @@ pub enum CloseBehavior {
     /// Close hides the main window; process, tray and background capture stay.
     #[default]
     Tray,
+    Panel,
     /// Close quits the whole application.
     Quit,
 }
@@ -41,6 +42,7 @@ impl Serialize for CloseBehavior {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(match self {
             CloseBehavior::Tray => "tray",
+            CloseBehavior::Panel => "panel",
             CloseBehavior::Quit => "quit",
         })
     }
@@ -52,16 +54,27 @@ impl<'de> Deserialize<'de> for CloseBehavior {
         // "float" (the removed collapse-to-ball behavior) and anything unknown
         // migrate to the tray default.
         Ok(match value.as_str() {
+            "panel" => CloseBehavior::Panel,
             "quit" => CloseBehavior::Quit,
             _ => CloseBehavior::Tray,
         })
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrayCloseBehavior {
+    #[default]
+    Tray,
+    Quit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopPreferences {
     pub close_behavior: CloseBehavior,
+    #[serde(default)]
+    pub tray_close_behavior: TrayCloseBehavior,
     #[serde(default)]
     pub auto_start: bool,
     /// Clipboard capture switch. Pausing keeps the monitor thread alive but
@@ -98,6 +111,7 @@ impl Default for DesktopPreferences {
     fn default() -> Self {
         Self {
             close_behavior: CloseBehavior::Tray,
+            tray_close_behavior: TrayCloseBehavior::Tray,
             auto_start: false,
             capture_enabled: true,
             history_retention_days: HistoryRetentionDays::default(),
@@ -285,7 +299,8 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("quick-image-board-prefs-{}", uuid::Uuid::new_v4()));
         let preferences = DesktopPreferences {
-            close_behavior: CloseBehavior::Tray,
+            close_behavior: CloseBehavior::Panel,
+            tray_close_behavior: TrayCloseBehavior::Quit,
             auto_start: true,
             capture_enabled: false,
             history_retention_days: HistoryRetentionDays::new(90).unwrap(),
@@ -309,7 +324,8 @@ mod tests {
         assert!(!tmp.exists());
         let json: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(json["closeBehavior"], "tray");
+        assert_eq!(json["closeBehavior"], "panel");
+        assert_eq!(json["trayCloseBehavior"], "quit");
         assert_eq!(json["autoStart"], true);
         assert_eq!(json["captureEnabled"], false);
         assert_eq!(json["historyRetentionDays"], 90);
@@ -321,6 +337,8 @@ mod tests {
 
         // Reload keeps the remembered bounds verbatim.
         let reloaded = load(&root);
+        assert_eq!(reloaded.close_behavior, CloseBehavior::Panel);
+        assert_eq!(reloaded.tray_close_behavior, TrayCloseBehavior::Quit);
         assert_eq!(reloaded.window_bounds, preferences.window_bounds);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -339,6 +357,7 @@ mod tests {
         let preferences = load(&root);
 
         assert_eq!(preferences.close_behavior, CloseBehavior::Quit);
+        assert_eq!(preferences.tray_close_behavior, TrayCloseBehavior::Tray);
         assert!(preferences.auto_start);
         // Capture must default to on so a fresh install records immediately.
         assert!(preferences.capture_enabled);
@@ -382,7 +401,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(load(&root).history_retention_days.days(), 30);
+        let preferences = load(&root);
+        assert_eq!(preferences.close_behavior, CloseBehavior::Tray);
+        assert_eq!(preferences.history_retention_days.days(), 30);
         let _ = std::fs::remove_dir_all(root);
     }
 

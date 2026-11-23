@@ -338,6 +338,7 @@ export function TrayPanel(): JSX.Element {
       .then((settings) => setCaptureEnabled(settings.captureEnabled))
       .catch(() => {});
     const off = window.imageBoard.onStateChanged((next) => applyStateRef.current(next));
+    const offCapture = window.imageBoard.onCaptureChanged?.(setCaptureEnabled);
     const onShow = () => {
       void refreshRef.current();
       markShownRef.current();
@@ -349,6 +350,7 @@ export function TrayPanel(): JSX.Element {
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       off();
+      offCapture?.();
       window.removeEventListener("focus", onShow);
       document.removeEventListener("visibilitychange", onVisibility);
     };
@@ -510,6 +512,12 @@ export function TrayPanel(): JSX.Element {
       .catch((error: unknown) => showErrorRef.current(hostErrorMessage(error, "无法打开主窗口")));
   }, []);
 
+  const hidePanel = useCallback(() => {
+    void window.imageBoard
+      .hideTrayPanel()
+      .catch((error: unknown) => showErrorRef.current(hostErrorMessage(error, "无法隐藏窗口")));
+  }, []);
+
   const toggleCapture = useCallback(() => {
     const next = !captureEnabled;
     void window.imageBoard
@@ -593,9 +601,7 @@ export function TrayPanel(): JSX.Element {
         return;
       }
       event.preventDefault();
-      void window.imageBoard
-        .hideTrayPanel()
-        .catch((error: unknown) => showErrorRef.current(hostErrorMessage(error, "无法隐藏窗口")));
+      hidePanel();
       return;
     }
 
@@ -954,16 +960,19 @@ export function TrayPanel(): JSX.Element {
             <Button variant="default" className="tray-foot-main" onClick={() => openMain()}>
               打开 PicBoard
             </Button>
+            <Button variant="outline" className="tray-foot-secondary" onClick={hidePanel}>
+              收起到托盘
+            </Button>
             <Button
               variant="outline"
-              className="tray-foot-quit"
+              className="tray-foot-secondary"
               onClick={() =>
                 void window.imageBoard
                   .quitApp()
                   .catch((error: unknown) => showErrorRef.current(hostErrorMessage(error, "无法退出")))
               }
             >
-              退出
+              退出 PicBoard
             </Button>
           </footer>
         </div>

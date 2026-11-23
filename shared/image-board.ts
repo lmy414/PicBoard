@@ -168,10 +168,10 @@ export interface CanvasPoint {
 }
 
 /**
- * Window close behavior: hide into the system tray (default) or quit. The
- * tray panel window is independent of this choice.
+ * Main window behavior on close. The tray panel has its own close preference.
  */
-export type CloseBehavior = "tray" | "quit";
+export type TrayCloseBehavior = "tray" | "quit";
+export type CloseBehavior = TrayCloseBehavior | "panel";
 
 /** View/content navigation requested for the main window (tray panel → main). */
 export interface MainNavigation {
@@ -184,6 +184,7 @@ export type HistoryRetentionDays = 0 | 7 | 30 | 90 | 365;
 
 export interface DesktopSettings {
   closeBehavior: CloseBehavior;
+  trayCloseBehavior: TrayCloseBehavior;
   autoStart: boolean;
   autoStartAvailable: boolean;
   /** Background clipboard recording; false means paused. Default true. */
@@ -200,6 +201,7 @@ export interface DesktopSettings {
 
 export interface DesktopSettingsPatch {
   closeBehavior?: CloseBehavior;
+  trayCloseBehavior?: TrayCloseBehavior;
   autoStart?: boolean;
   captureEnabled?: boolean;
   historyRetentionDays?: HistoryRetentionDays;
@@ -339,6 +341,7 @@ export interface ImageBoardApi {
   /** Show, un-minimize and focus the main window (hides the tray panel); optionally navigate it. */
   showMainWindow(navigate?: MainNavigation): Promise<void>;
   hideTrayPanel(): Promise<void>;
+  onCaptureChanged(listener: (enabled: boolean) => void): () => void;
   getDesktopSettings(): Promise<DesktopSettings>;
   setDesktopSettings(patch: DesktopSettingsPatch): Promise<DesktopSettings>;
   pickDirectory(initialPath?: string): Promise<string | null>;

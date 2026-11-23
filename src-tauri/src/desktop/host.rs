@@ -1,27 +1,16 @@
-//! Desktop lifecycle host: owns the close behavior decision (float / tray /
-//! quit), keeps React informed about window expansion, and exposes
-//! `get/setDesktopSettings` + `pickDirectory` to the renderer.
-//!
-//! Close semantics (single entry point for both the renderer's × button and
-//! the OS/system close path):
-//! - float: collapse to the floating ball (same as "收起").
-//! - tray: hide the window; process and tray stay alive.
-//! - quit: quit the whole application.
-//!
-//! Window close requests funnel through the CloseRequested handler which may
-//! `prevent_close`; the renderer is notified via `window:expanded-changed` so
-//! UI state and the real window never disagree.
+//! Desktop preferences and native window close requests.
 
 use crate::desktop::prefs::{
     load as load_prefs, save as save_prefs, CloseBehavior, DesktopPreferences, GridSize,
-    HistoryRetentionDays,
+    HistoryRetentionDays, TrayCloseBehavior,
 };
 use crate::desktop::{setup_tray, AutoStartManager};
 use crate::error::AppError;
+use crate::window_controller::WindowController;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, State, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WindowEvent};
 
 /// Debug/dev builds never register auto-start and report the toggle as
 /// unavailable. Detection mirrors `tauri::is_dev()` plus the explicit debug
@@ -31,7 +20,7 @@ pub fn is_dev_build() -> bool {
 }
 
 pub struct DesktopState {
-    pub prefs: Mutex<DesktopPreferences>,
+    prefs: Mutex<DesktopPreferences>,
     pub auto_start: AutoStartManager,
     pub data_root: PathBuf,
     /// Live clipboard-capture switch shared with the monitor thread, so
@@ -47,21 +36,32 @@ impl DesktopState {
             .clone()
     }
 
-    /// Persist the titlebar pin choice; failures are logged, never surfaced.
-    pub fn set_window_pinned(&self, pinned: bool) {
-        let mut prefs = self.current();
-        if prefs.main_window_pinned == pinned {
-            return;
-        }
-        prefs.main_window_pinned = pinned;
-        if let Err(error) = save_prefs(&self.data_root, &prefs) {
-            eprintln!("[desktop] failed to save pinned preference: {error}");
-            return;
-        }
-        *self
+    fn edit(
+        &self,
+        edit: impl FnOnce(&mut DesktopPreferences) -> Result<(), AppError>,
+    ) -> Result<DesktopPreferences, AppError> {
+        let mut current = self
             .prefs
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner()) = prefs;
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut next = current.clone();
+        edit(&mut next)?;
+        if next != *current {
+            save_prefs(&self.data_root, &next)?;
+            self.capture.store(next.capture_enabled, Ordering::Release);
+            *current = next.clone();
+        }
+        Ok(next)
+    }
+
+    /// Persist the titlebar pin choice; failures are logged, never surfaced.
+    pub fn set_window_pinned(&self, pinned: bool) {
+        if let Err(error) = self.edit(|prefs| {
+            prefs.main_window_pinned = pinned;
+            Ok(())
+        }) {
+            eprintln!("[desktop] failed to save pinned preference: {error}");
+        }
     }
 
     /// `true` while clipboard capture is recording (mirrors `captureEnabled`).
@@ -93,8 +93,6 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         capture: Arc::new(AtomicBool::new(prefs.capture_enabled)),
     });
 
-    // Tray is always created: with closeBehavior tray/float it is the way the
-    // window can be restored; even under "quit" a tray exit stays available.
     setup_tray(app.handle())?;
     Ok(())
 }
@@ -106,50 +104,73 @@ pub struct SettingsChange {
     pub retention_changed: bool,
 }
 
+#[derive(Default)]
+pub struct SettingsPatch {
+    pub close_behavior: Option<CloseBehavior>,
+    pub tray_close_behavior: Option<TrayCloseBehavior>,
+    pub auto_start: Option<bool>,
+    pub capture_enabled: Option<bool>,
+    pub history_retention_days: Option<HistoryRetentionDays>,
+    pub snap_to_grid: Option<bool>,
+    pub grid_size: Option<GridSize>,
+}
+
 /// Update settings from a renderer command; failures propagate to the caller
 /// so the UI never shows a fabricated success.
 pub fn update_settings(
-    state: &State<'_, DesktopState>,
-    close_behavior: Option<CloseBehavior>,
-    auto_start: Option<bool>,
-    capture_enabled: Option<bool>,
-    history_retention_days: Option<HistoryRetentionDays>,
-    snap_to_grid: Option<bool>,
-    grid_size: Option<GridSize>,
+    app: &AppHandle,
+    state: &DesktopState,
+    patch: SettingsPatch,
 ) -> Result<(DesktopPreferences, SettingsChange), AppError> {
-    let mut prefs = state.current();
-    let previous_retention = prefs.history_retention_days;
-    if let Some(value) = close_behavior {
-        prefs.close_behavior = value;
+    let mut change = SettingsChange::default();
+    let mut capture_changed = false;
+    let prefs = state.edit(|prefs| {
+        if let Some(value) = patch.close_behavior {
+            prefs.close_behavior = value;
+        }
+        if let Some(value) = patch.tray_close_behavior {
+            prefs.tray_close_behavior = value;
+        }
+        if let Some(enabled) = patch.auto_start {
+            state.auto_start.set_enabled(enabled)?;
+            prefs.auto_start = enabled;
+        }
+        if let Some(enabled) = patch.capture_enabled {
+            capture_changed = prefs.capture_enabled != enabled;
+            prefs.capture_enabled = enabled;
+        }
+        if let Some(days) = patch.history_retention_days {
+            change.retention_changed = prefs.history_retention_days != days;
+            prefs.history_retention_days = days;
+        }
+        if let Some(snap) = patch.snap_to_grid {
+            prefs.snap_to_grid = snap;
+        }
+        if let Some(size) = patch.grid_size {
+            prefs.grid_size = size;
+        }
+        Ok(())
+    })?;
+    if capture_changed {
+        publish_capture_state(app, state);
     }
-    if let Some(enabled) = auto_start {
-        state.auto_start.set_enabled(enabled)?;
-        prefs.auto_start = enabled;
-    }
-    if let Some(enabled) = capture_enabled {
-        prefs.capture_enabled = enabled;
-    }
-    if let Some(days) = history_retention_days {
-        prefs.history_retention_days = days;
-    }
-    if let Some(snap) = snap_to_grid {
-        prefs.snap_to_grid = snap;
-    }
-    if let Some(size) = grid_size {
-        prefs.grid_size = size;
-    }
-    save_prefs(&state.data_root, &prefs)?;
-    state
-        .capture
-        .store(prefs.capture_enabled, Ordering::Release);
-    *state
-        .prefs
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner()) = prefs.clone();
-    let change = SettingsChange {
-        retention_changed: prefs.history_retention_days != previous_retention,
-    };
     Ok((prefs, change))
+}
+
+pub(super) fn toggle_capture(app: &AppHandle) -> Result<(), AppError> {
+    let state = app.state::<DesktopState>();
+    state.edit(|prefs| {
+        prefs.capture_enabled = !prefs.capture_enabled;
+        Ok(())
+    })?;
+    publish_capture_state(app, &state);
+    Ok(())
+}
+
+fn publish_capture_state(app: &AppHandle, state: &DesktopState) {
+    let enabled = state.capture.load(Ordering::Acquire);
+    super::tray::update_capture_menu(app, enabled);
+    let _ = app.emit("desktop:capture-changed", enabled);
 }
 
 /// Remember the user-chosen bounds of the expanded window. Called (debounced)
@@ -170,74 +191,51 @@ pub fn remember_window_bounds(
         height: bounds.height,
         monitor,
     };
-    let mut prefs = state.current();
-    if prefs.window_bounds.as_ref() == Some(&saved) {
-        return;
-    }
-    prefs.window_bounds = Some(saved);
-    if let Err(error) = save_prefs(&state.data_root, &prefs) {
+    if let Err(error) = state.edit(move |prefs| {
+        prefs.window_bounds = Some(saved);
+        Ok(())
+    }) {
         eprintln!("[desktop] failed to save window bounds: {error}");
-        return;
     }
-    *state
-        .prefs
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner()) = prefs;
 }
 
-/// Install the close-request interception on the main window. Both the
-/// renderer × button (`closeWindow`) and any system close path end here.
-///
-/// All three behaviors prevent the raw close because a live tray icon keeps
-/// the process running; quitting must therefore exit the app explicitly.
-///
-/// Only `prevent_close()` (a flag) runs inside the callback: hiding or exiting
-/// re-entrantly from the event dispatch is what froze the UI thread, so the
-/// action itself is deferred to a worker.
-pub fn install_close_behavior(window: &WebviewWindow) -> Result<(), AppError> {
+/// Keep both webviews alive until an explicit process exit. Window operations
+/// are deferred out of the native close callback.
+pub fn install_close_behavior(window: &WebviewWindow) {
     let app = window.app_handle().clone();
+    let is_tray = window.label() == "tray";
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
-            let Some(state) = app.try_state::<DesktopState>() else {
-                return;
-            };
-            let behavior = state.current().close_behavior;
             api.prevent_close();
             let app = app.clone();
             crate::platform::spawn_worker("picboard-close-action", move || {
-                if let Err(error) = apply_close_action(&app, behavior) {
+                if let Err(error) = apply_close_action(&app, is_tray) {
                     eprintln!("[desktop] close action failed: {error}");
                 }
             });
         }
     });
-    Ok(())
 }
 
-/// Perform the close action after a prevented close: hide into the tray or
-/// fully quit (exit kills the tray too).
-pub fn apply_close_action(app: &AppHandle, behavior: CloseBehavior) -> Result<(), AppError> {
-    match behavior {
-        CloseBehavior::Quit => {
-            app.exit(0);
-            Ok(())
+fn apply_close_action(app: &AppHandle, is_tray: bool) -> Result<(), AppError> {
+    let prefs = app.state::<DesktopState>().current();
+    let controller = app.state::<WindowController>();
+    if is_tray {
+        match prefs.tray_close_behavior {
+            TrayCloseBehavior::Tray => controller.hide_tray_panel(),
+            TrayCloseBehavior::Quit => {
+                app.exit(0);
+                Ok(())
+            }
         }
-        CloseBehavior::Tray => {
-            // Animated path: the controller emits `window:hide-anim`, gives the
-            // renderer ~200 ms to fade its shell, then hides the window.
-            if let Some(controller) = app.try_state::<crate::window_controller::WindowController>() {
-                return controller.hide_to_tray();
+    } else {
+        match prefs.close_behavior {
+            CloseBehavior::Tray => controller.close_main_to_tray(false),
+            CloseBehavior::Panel => controller.close_main_to_tray(true),
+            CloseBehavior::Quit => {
+                app.exit(0);
+                Ok(())
             }
-            let window = app
-                .get_webview_window("main")
-                .ok_or_else(|| AppError::message("主窗口不存在"))?;
-            if let Some(readiness) = app.try_state::<crate::startup_readiness::StartupReadiness>() {
-                readiness.mark_user_hidden("main");
-            }
-            // Hiding keeps the process, the tray icon and the background
-            // clipboard capture alive.
-            window.hide()?;
-            Ok(())
         }
     }
 }

@@ -486,12 +486,19 @@ function App() {
   // Settings drive the drawer's recording state and the Settings page.
   useEffect(() => {
     let active = true;
+    const offCapture = window.imageBoard.onCaptureChanged?.((enabled) => {
+      setCaptureEnabled(enabled);
+      setDesktopSettings((current) => current && { ...current, captureEnabled: enabled });
+    });
     void window.imageBoard.getDesktopSettings().then((settings) => {
       if (!active) return;
       setDesktopSettings(settings);
       setCaptureEnabled(settings.captureEnabled !== false);
     }).catch(() => { /* Settings page and ShellSettings surface host errors themselves. */ });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      offCapture?.();
+    };
   }, []);
 
   useEffect(() => {

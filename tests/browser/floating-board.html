@@ -48,7 +48,7 @@
   const clone = () => structuredClone(state);
   const calls = { place: [], save: [], open: [], viewports: [], drags: 0,
     settings: [], associationReads: 0, configureAssociation: 0, directories: [], pluginLists: 0, categories: [] };
-  let desktopSettings = { closeBehavior: 'float', autoStart: false, autoStartAvailable: false, captureEnabled: true, historyRetentionDays: 30, snapToGrid: false, gridSize: 24 };
+  let desktopSettings = { closeBehavior: 'tray', trayCloseBehavior: 'tray', autoStart: false, autoStartAvailable: false, captureEnabled: true, historyRetentionDays: 30, snapToGrid: false, gridSize: 24 };
   let associationRegistered = false;
   window.floatingBoard = { calls, get state() { return clone(); }, get desktopSettings() { return structuredClone(desktopSettings); },
     failPlacement: parameters.has('failPlacement'), failAssociation: false };

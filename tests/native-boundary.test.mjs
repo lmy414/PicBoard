@@ -38,17 +38,20 @@ test("only the Rust/Tauri desktop route remains executable", async () => {
 
 test("window teardown stays non-blocking and close operations stay ordered", async () => {
   const lib = await source("src-tauri/src/lib.rs");
-  const destroyed = branchBetween(lib, "WindowEvent::Destroyed", "// Intercept close requests");
+  const destroyed = branchBetween(lib, "WindowEvent::Destroyed", "install_close_behavior(&window)");
   assert.match(destroyed, /request_teardown\(\)/);
   assert.doesNotMatch(destroyed, /\.join\(|stop_cursor_tracking\(\)|start_cursor_tracking\(\)/);
 
   const host = await source("src-tauri/src/desktop/host.rs");
-  const trayBranch = host.slice(host.indexOf("CloseBehavior::Tray =>"));
-  assert.match(trayBranch, /mark_user_hidden\("main"\)/);
-  assert.match(trayBranch, /window\.hide\(\)\?/);
-  assert.doesNotMatch(trayBranch, /cancel_drag|stop_cursor_tracking|set_window_expanded_state|app\.exit/);
-
+  assert.match(host, /CloseBehavior::Tray => controller\.close_main_to_tray\(false\)/);
+  assert.match(host, /CloseBehavior::Panel => controller\.close_main_to_tray\(true\)/);
+  assert.match(host, /TrayCloseBehavior::Tray => controller\.hide_tray_panel\(\)/);
   assert.match(host, /CloseBehavior::Quit => \{\s*app\.exit\(0\);/);
+  assert.match(lib, /install_close_behavior\(&tray_panel\)/);
+  const controller = await source("src-tauri/src/window_controller.rs");
+  const hideMain = branchBetween(controller, "fn hide_main(", "pub fn set_tray_panel_at");
+  assert.ok(hideMain.indexOf("mark_user_hidden") < hideMain.indexOf("win.hide()"));
+  assert.ok(hideMain.indexOf("win.hide()") < hideMain.indexOf("return_to_tray_panel"));
 });
 
 test("main is a plain desktop window and the tray panel is a flyout", async () => {
@@ -70,7 +73,7 @@ test("main is a plain desktop window and the tray panel is a flyout", async () =
   // Tray flyout hides on focus loss.
   const blur = branchBetween(lib, "tray_panel.on_window_event", "});");
   assert.match(blur, /Focused\(false\)/);
-  assert.match(blur, /\.hide\(\)/);
+  assert.match(blur, /dismiss_unfocused_tray\(\)/);
 });
 
 test("ball drag, cursor tracking and drag-in commands are gone", async () => {
@@ -89,8 +92,8 @@ test("ball drag, cursor tracking and drag-in commands are gone", async () => {
     assert.doesNotMatch(commands, new RegExp(gone.replace(/ /g, "\\s+")));
   }
   for (const present of [
-    "pub fn show_main_window",
-    "pub fn hide_tray_panel",
+    "pub async fn show_main_window",
+    "pub async fn hide_tray_panel",
     "pub fn minimize_window",
     "pub fn quit_app",
     "pub fn paste_clipboard",
@@ -115,16 +118,18 @@ test("mutating commands broadcast state-changed to all windows", async () => {
   assert.match(retention, /app\.emit\(crate::STATE_CHANGED_EVENT/);
 });
 
-test("tray left click toggles the panel and the menu opens or quits", async () => {
+test("tray click gestures and the three menu actions are connected", async () => {
   const tray = await source("src-tauri/src/desktop/tray.rs");
   const clickPath = branchBetween(tray, "on_tray_icon_event", "builder.build(app)?");
   assert.match(clickPath, /MouseButton::Left/);
-  assert.match(clickPath, /toggle_tray_panel/);
+  assert.match(clickPath, /set_tray_panel_at/);
+  assert.match(clickPath, /TrayIconEvent::DoubleClick/);
   assert.match(tray, /show_menu_on_left_click\(false\)/);
   assert.match(tray, /打开 PicBoard/);
   assert.match(tray, /退出/);
   const menuPath = branchBetween(tray, "on_menu_event", "let toggle_app");
   assert.match(menuPath, /MENU_OPEN/);
+  assert.match(menuPath, /MENU_CAPTURE => toggle_capture/);
   assert.match(menuPath, /show_main_window|show_main\(/);
   assert.match(menuPath, /exit\(0\)/);
 });
@@ -182,7 +187,7 @@ test("window APIs are deferred out of window and tray callbacks", async () => {
   assert.match(click, /spawn_worker\("picboard-tray-click"/);
 
   const host = await source("src-tauri/src/desktop/host.rs");
-  const close = branchBetween(host, "pub fn install_close_behavior", "/// Perform the close action");
+  const close = branchBetween(host, "pub fn install_close_behavior", "fn apply_close_action");
   // Only the flag runs in the callback; hiding/exit is deferred.
   assert.match(close, /prevent_close\(\)/);
   assert.match(close, /spawn_worker\("picboard-close-action"/);
@@ -197,7 +202,9 @@ test("launch images wait until both windows and close behavior exist", async () 
   const ready = setup.indexOf("mark_setup_ready()");
   assert.ok(ready > setup.indexOf('WebviewWindowBuilder::new(app, "main"'));
   assert.ok(ready > setup.indexOf('WebviewWindowBuilder::new(app, "tray"'));
-  assert.ok(ready > setup.indexOf("install_close_behavior(&window)?"));
+  const mainClose = setup.indexOf("install_close_behavior(&window)");
+  const trayClose = setup.indexOf("install_close_behavior(&tray_panel)");
+  assert.ok(mainClose >= 0 && trayClose >= 0 && ready > mainClose && ready > trayClose);
   assert.ok(setup.indexOf("process_pending_images(app.handle())") > ready);
   const run = lib.slice(lib.indexOf("pub fn run()"));
   assert.ok(run.indexOf("pending_images.enqueue") < run.indexOf("tauri_plugin_single_instance::init"));

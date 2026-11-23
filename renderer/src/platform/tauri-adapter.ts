@@ -160,6 +160,8 @@ export function createTauriAdapter(): ImageBoardApi {
     showMainWindow: (navigate?: MainNavigation) =>
       call<void>("show_main_window", { navigate: navigate ?? null }),
     hideTrayPanel: () => call<void>("hide_tray_panel"),
+    onCaptureChanged: (listener: (enabled: boolean) => void) =>
+      subscribe<boolean>("desktop:capture-changed", listener),
     getDesktopSettings: () => call<DesktopSettings>("get_desktop_settings"),
     setDesktopSettings: (patch: DesktopSettingsPatch) =>
       call<DesktopSettings>("set_desktop_settings", { patch }),

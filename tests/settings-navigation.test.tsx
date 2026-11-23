@@ -7,7 +7,7 @@ import { SETTINGS_SECTIONS, SettingsNavigation, SettingsPage } from "../renderer
 import type { SettingsPageProps } from "../renderer/src/ui/SettingsPage";
 
 const desktop: DesktopSettings = {
-  closeBehavior: "tray", autoStart: false, autoStartAvailable: true,
+  closeBehavior: "tray", trayCloseBehavior: "tray", autoStart: false, autoStartAvailable: true,
   captureEnabled: true, historyRetentionDays: 30, snapToGrid: false, gridSize: 24,
 };
 

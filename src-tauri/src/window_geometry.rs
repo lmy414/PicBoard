@@ -163,6 +163,21 @@ pub fn anchor_tray_panel(
     panel
 }
 
+pub fn fit_tray_panel(saved_position: Option<(i32, i32)>, work_area: Rect) -> Rect {
+    let (left, top) = saved_position.unwrap_or((
+        work_area.right() - TRAY_PANEL_WIDTH - PANEL_GAP,
+        work_area.bottom() - TRAY_PANEL_HEIGHT - PANEL_GAP,
+    ));
+    let mut panel = Rect {
+        x: left,
+        y: top,
+        width: TRAY_PANEL_WIDTH,
+        height: TRAY_PANEL_HEIGHT,
+    };
+    clamp_position(&mut panel, work_area);
+    panel
+}
+
 /// The bounds saver never persists a maximized frame: restoring from the
 /// maximize is the user's chosen geometry.
 pub(crate) fn should_persist_bounds(maximized: bool, minimized: bool) -> bool {
@@ -172,6 +187,17 @@ pub(crate) fn should_persist_bounds(maximized: bool, minimized: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tray_return_uses_dragged_position_or_a_fallback_within_the_work_area() {
+        let screen = work(-1920, 0, 1920, 1040);
+        let restored = fit_tray_panel(Some((-1420, 140)), screen);
+        assert_eq!((restored.x, restored.y), (-1420, 140));
+        let fallback = fit_tray_panel(None, screen);
+        assert_eq!((fallback.right(), fallback.bottom()), (-PANEL_GAP, 1040 - PANEL_GAP));
+        let clamped = fit_tray_panel(Some((50, 500)), screen);
+        assert_eq!((clamped.right(), clamped.bottom()), (0, 1040));
+    }
 
     fn work(x: i32, y: i32, width: i32, height: i32) -> Rect {
         Rect {
